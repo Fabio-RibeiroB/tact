@@ -15,7 +15,7 @@ var (
 )
 
 const (
-	PanePollInterval      = 2  // seconds
+	PanePollInterval      = 1  // seconds
 	DiscoveryPollInterval = 10 // seconds
 	CostPollInterval      = 30 // seconds
 )
