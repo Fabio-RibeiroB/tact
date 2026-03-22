@@ -1,0 +1,26 @@
+project_name: tact
+
+builds:
+  - main: ./cmd/tact
+    binary: tact
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+
+release:
+  github:
+    owner: fabiobrady
+    name: tact
+
+brews:
+  - repository:
+      owner: fabiobrady
+      name: homebrew-tap
+    name: tact
+    homepage: https://github.com/fabiobrady/tact
+    description: Control tower for AI coding sessions
