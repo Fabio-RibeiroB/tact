@@ -40,6 +40,10 @@ var (
 
 	helpStyle = lipgloss.NewStyle().Foreground(colorDim)
 
+	panelHeadingStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorText)
+
 	previewBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorBorder)

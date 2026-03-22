@@ -605,7 +605,7 @@ func (a App) View() string {
 	if len(listLines) == 0 {
 		listLines = append(listLines, lipgloss.NewStyle().Foreground(colorDim).Render("  No sessions found"))
 	}
-	listContent := strings.Join(listLines, "\n")
+	listContent := panelHeadingStyle.Render("Your AI sessions") + "\n" + strings.Join(listLines, "\n")
 
 	sessionBorder := panelBorder
 	if a.focusPanel == panelSessions {

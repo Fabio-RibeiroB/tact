@@ -176,8 +176,9 @@ func renderSessionRow(s model.SessionInfo, selected bool, blinkOn bool, spinnerI
 
 func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	if s == nil {
-		return lipgloss.NewStyle().Foreground(colorDim).
-			Render("\n  No session selected")
+		return panelHeadingStyle.Render("Overview") + "\n" +
+			lipgloss.NewStyle().Foreground(colorDim).
+				Render("\n  No session selected")
 	}
 
 	typeName := "Claude Code"
@@ -193,6 +194,8 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).
 		Render(s.DisplayName())
 	lines := []string{
+		panelHeadingStyle.Render("Overview"),
+		"",
 		title + "  " + statusBadge(s.Status),
 		"",
 	}
