@@ -6,29 +6,29 @@
 
 **Tmux AI Control Tower** — A terminal dashboard for monitoring and managing multiple AI coding sessions running in tmux panes.
 
-![Dashboard Preview](docs/imgs/dashboard.png)
+![Tact Dashboard](docs/imgs/screen-shot.png)
+
+I wanted to accept/reject my AI assistant's work without leaving one window in tmux.
+I also wanted notifications when my input was needed. So I built this.
+Just run `tact` in a window within tmux and it will detect other panes/windows running Claude Code or other coding agent.
 
 ## Features
-
-- **Multi-session Monitoring**: Track multiple AI coding sessions simultaneously across tmux panes
-- **Real-time Status Detection**: Automatically detects session states (idle, working, needs attention, disconnected)
-- **Cost Tracking**: Monitor token usage and costs for Claude Code sessions
-- **Context Window Awareness**: See context window utilization at a glance
-- **Desktop Notifications**: Get alerts when sessions need attention
-- **Shared Todo Management**: Create and manage project-level todos synced across sessions
-- **Remote Control**: Send inputs to sessions without switching panes
-
-### Supported AI Tools
-
-| Tool | Detection | Status | Context | Cost |
-|------|-----------|--------|---------|------|
-| Claude Code | Full | Full | Full | Full |
-| Kiro CLI | Full | Full | Partial | — |
-| Codex | Full | Full | Partial | — |
-| Opencode | Full | Full | Partial | — |
+- Switch easily between AI coding sessions like Claude Code, Codex, Opencode and Kiro-cli in tmux
+- Accept/Reject your agent's work
+- Automatically detects session states (idle, working, needs attention, disconnected)
+- Monitor token usage and costs for Claude Code sessions
+- See context window utilization at a glance
+- Get alerts when sessions need attention
+- Create and manage project-level todos synced across sessions
+- Send inputs to sessions without switching panes
 
 ## Installation
 
+### Quick Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Fabio-RibeiroB/tact/main/go/install.sh | bash
+```
 ### From Source
 
 ```bash
@@ -36,13 +36,6 @@ git clone https://github.com/Fabio-RibeiroB/tact.git
 cd tact/go
 make install
 ```
-
-### Quick Install
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Fabio-RibeiroB/tact/main/go/install.sh | bash
-```
-
 ### Requirements
 
 - Go 1.22 or later
@@ -50,13 +43,11 @@ curl -sSL https://raw.githubusercontent.com/Fabio-RibeiroB/tact/main/go/install.
 
 ## Usage
 
-### Launch the Dashboard
+Run tact within any window/pane to auto detect your AI coding sessions.
 
 ```bash
 tact
 ```
-
-![Sessions View](docs/imgs/sessions.png)
 
 ### Keyboard Shortcuts
 
@@ -98,26 +89,6 @@ tact todo done abc12345
 tact todo start abc12345
 tact todo rm abc12345
 ```
-
-## Screenshots
-
-### Main Dashboard
-
-![Main Dashboard](docs/imgs/dashboard.png)
-
-The main dashboard shows:
-- **Left panel**: Session list with status indicators and todo list
-- **Right panel**: Detailed view of selected session including task summary, cost, and context
-
-### Session States
-
-| Status | Icon | Description |
-|--------|------|-------------|
-| Idle | `●` | Session waiting for input |
-| Working | `◉` | Session actively processing |
-| Needs Attention | `◉` | Session awaiting user response |
-| Disconnected | `○` | Pane no longer accessible |
-
 ## Architecture
 
 ```
@@ -142,17 +113,6 @@ tact/
 Session data and todos are stored in `~/.local/share/tact/`:
 - `sessions/<session-id>.jsonl` — Parsed session data
 - `todos/<project-slug>.json` — Project-specific todo lists
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes following conventional commits
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
-
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
