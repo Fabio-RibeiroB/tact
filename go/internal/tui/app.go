@@ -282,13 +282,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case paneUpdateMsg:
-		a.mergeSessions([]model.SessionInfo(msg))
+		a.updateSessions([]model.SessionInfo(msg))
 		a.checkNotifications()
 		a.refreshTodos()
 		return a, nil
 
 	case costUpdateMsg:
-		a.mergeSessions([]model.SessionInfo(msg))
+		a.updateSessions([]model.SessionInfo(msg))
 		for i := range a.sessions {
 			s := &a.sessions[i]
 			if s.CostUSD > 0 {
@@ -656,8 +656,43 @@ func (a *App) removeTodo(id string) {
 
 // ── Session management ───────────────────────────────────────────
 
-func (a *App) mergeSessions(updated []model.SessionInfo) {
-	if len(updated) == 0 {
+// mergeFields copies preserved fields from prev into u.
+func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
+	if u.Status == model.StatusUnknown && prev.Status != model.StatusUnknown {
+		u.Status = prev.Status
+	}
+	if u.CostUSD == 0 && prev.CostUSD > 0 {
+		u.CostUSD = prev.CostUSD
+	}
+	if u.ContextPct == 0 && prev.ContextPct > 0 {
+		u.ContextPct = prev.ContextPct
+		u.ContextTokens = prev.ContextTokens
+	}
+	if u.GitBranch == "" && prev.GitBranch != "" {
+		u.GitBranch = prev.GitBranch
+	}
+	if u.LastActivity == "" && prev.LastActivity != "" {
+		u.LastActivity = prev.LastActivity
+	}
+	if u.TaskSummary == "" && prev.TaskSummary != "" {
+		u.TaskSummary = prev.TaskSummary
+	}
+	if u.SessionID == "" && prev.SessionID != "" {
+		u.SessionID = prev.SessionID
+	}
+	if u.ProjectName == "" && prev.ProjectName != "" {
+		u.ProjectName = prev.ProjectName
+	}
+	if u.PaneContent == "" && prev.PaneContent != "" {
+		u.PaneContent = prev.PaneContent
+	}
+	u.CostHistory = prev.CostHistory
+}
+
+// mergeSessions handles discovery results: adds new sessions, updates existing
+// ones, and marks sessions missing from discovery as Disconnected (never drops them).
+func (a *App) mergeSessions(discovered []model.SessionInfo) {
+	if len(discovered) == 0 {
 		return
 	}
 	existing := make(map[string]*model.SessionInfo, len(a.sessions))
@@ -665,44 +700,48 @@ func (a *App) mergeSessions(updated []model.SessionInfo) {
 		existing[a.sessions[i].PaneID] = &a.sessions[i]
 	}
 
-	merged := make([]model.SessionInfo, 0, len(updated))
-	for _, u := range updated {
+	inDiscovery := make(map[string]bool, len(discovered))
+	merged := make([]model.SessionInfo, 0, len(discovered))
+	for _, u := range discovered {
+		inDiscovery[u.PaneID] = true
 		if prev, ok := existing[u.PaneID]; ok {
-			if u.Status == model.StatusUnknown && prev.Status != model.StatusUnknown {
-				u.Status = prev.Status
-			}
-			if u.CostUSD == 0 && prev.CostUSD > 0 {
-				u.CostUSD = prev.CostUSD
-			}
-			if u.ContextPct == 0 && prev.ContextPct > 0 {
-				u.ContextPct = prev.ContextPct
-				u.ContextTokens = prev.ContextTokens
-			}
-			if u.GitBranch == "" && prev.GitBranch != "" {
-				u.GitBranch = prev.GitBranch
-			}
-			if u.LastActivity == "" && prev.LastActivity != "" {
-				u.LastActivity = prev.LastActivity
-			}
-			if u.TaskSummary == "" && prev.TaskSummary != "" {
-				u.TaskSummary = prev.TaskSummary
-			}
-			if u.SessionID == "" && prev.SessionID != "" {
-				u.SessionID = prev.SessionID
-			}
-			if u.ProjectName == "" && prev.ProjectName != "" {
-				u.ProjectName = prev.ProjectName
-			}
-			if u.PaneContent == "" && prev.PaneContent != "" {
-				u.PaneContent = prev.PaneContent
-			}
-			u.CostHistory = prev.CostHistory
+			mergeFields(&u, prev)
 		}
 		merged = append(merged, u)
 	}
+
+	// Keep sessions not found by discovery as Disconnected rather than dropping them.
+	for _, prev := range a.sessions {
+		if !inDiscovery[prev.PaneID] {
+			prev.Status = model.StatusDisconnected
+			merged = append(merged, prev)
+		}
+	}
+
 	a.sessions = merged
 	if a.selectedIdx >= len(a.sessions) {
 		a.selectedIdx = max(0, len(a.sessions)-1)
+	}
+}
+
+// updateSessions handles pane/cost update results: only updates existing sessions,
+// never adds or removes entries (discovery is the sole authority for that).
+func (a *App) updateSessions(updated []model.SessionInfo) {
+	if len(updated) == 0 {
+		return
+	}
+	index := make(map[string]model.SessionInfo, len(updated))
+	for _, u := range updated {
+		index[u.PaneID] = u
+	}
+	for i := range a.sessions {
+		u, ok := index[a.sessions[i].PaneID]
+		if !ok {
+			continue
+		}
+		prev := a.sessions[i]
+		mergeFields(&u, &prev)
+		a.sessions[i] = u
 	}
 }
 
