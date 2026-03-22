@@ -31,24 +31,24 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 
 	title := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(colorCyan).
+		Foreground(tokenFgAccent).
 		Render("⚡ TACT")
 
-	sessionPill := headerPill("Sessions", fmt.Sprintf("%d", len(sessions)), colorText)
+	sessionPill := headerPill("Sessions", fmt.Sprintf("%d", len(sessions)), tokenFgDefault)
 
 	var attnPill string
 	if attn > 0 {
-		attnPill = headerPill("", fmt.Sprintf("⚠ %d NEED ATTENTION", attn), colorRed)
+		attnPill = headerPill("", fmt.Sprintf("⚠ %d NEED ATTENTION", attn), tokenFgDanger)
 	} else {
-		attnPill = headerPill("", "✓ all clear", colorGreen)
+		attnPill = headerPill("", "✓ all clear", tokenFgSuccess)
 	}
 
-	costPill := headerPill("Today", fmt.Sprintf("$%.2f", totalCost), colorYellow)
-	clockPill := headerPill("", time.Now().Format("15:04:05"), colorDim)
+	costPill := headerPill("Today", fmt.Sprintf("$%.2f", totalCost), tokenFgWarning)
+	clockPill := headerPill("", time.Now().Format("15:04:05"), tokenFgMuted)
 
-	notifyStr := lipgloss.NewStyle().Foreground(colorGreen).Render("🔔")
+	notifyStr := lipgloss.NewStyle().Foreground(tokenFgSuccess).Render("🔔")
 	if !notifyEnabled {
-		notifyStr = lipgloss.NewStyle().Foreground(colorDim).Render("🔕")
+		notifyStr = lipgloss.NewStyle().Foreground(tokenFgMuted).Render("🔕")
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center,
@@ -65,14 +65,14 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		Width(width).
 		Render(left + strings.Repeat(" ", gap) + right)
 
-	// Summary line: what the selected session is doing + working count + todo hint
+	// Summary line
 	var summaryParts []string
 	if working > 0 {
 		summaryParts = append(summaryParts,
-			lipgloss.NewStyle().Foreground(colorBlue).Render(fmt.Sprintf("⟳ %d working", working)))
+			lipgloss.NewStyle().Foreground(tokenFgInfo).Render(fmt.Sprintf("⟳ %d working", working)))
 	}
 	if selected != nil && selected.TaskSummary != "" {
-		activity := selected.TaskSummary
+		activity := sanitizeField(selected.TaskSummary)
 		maxLen := width - 40
 		if maxLen < 30 {
 			maxLen = 30
@@ -82,8 +82,8 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		}
 		label := selected.DisplayName() + ": "
 		summaryParts = append(summaryParts,
-			lipgloss.NewStyle().Foreground(colorDim).Render(label)+
-				lipgloss.NewStyle().Foreground(colorText).Italic(true).Render(activity))
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(label)+
+				lipgloss.NewStyle().Foreground(tokenFgDefault).Italic(true).Render(activity))
 	}
 	summaryLine := ""
 	if len(summaryParts) > 0 {
@@ -99,77 +99,235 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 	return bar
 }
 
-// ── Session list row (two-line with left-border selection) ──────────
+// ── Tab bar ─────────────────────────────────────────────────────────
 
-func renderSessionRow(s model.SessionInfo, selected bool, blinkOn bool, spinnerIdx int, width int) string {
+func renderTabBar(activeTab, width int) string {
+	tabs := []struct {
+		key   string
+		label string
+		tab   int
+	}{
+		{"1", "Sessions", tabSessions},
+		{"2", "Todos", tabTodos},
+		{"3", "Output", tabOutput},
+	}
+
+	var parts []string
+	for _, t := range tabs {
+		keyStr := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("[" + t.key + "]")
+		if t.tab == activeTab {
+			label := lipgloss.NewStyle().
+				Foreground(tokenFgAccent).
+				Bold(true).
+				Underline(true).
+				Render(t.label)
+			parts = append(parts, keyStr+" "+label)
+		} else {
+			label := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(t.label)
+			parts = append(parts, keyStr+" "+label)
+		}
+	}
+
+	bar := "  " + strings.Join(parts, "   ")
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("#1a1b26")).
+		Width(width).
+		Render(bar)
+}
+
+// ── Filter bar ──────────────────────────────────────────────────────
+
+func renderFilterBar(active bool, text string, total, shown int, width int) string {
+	if !active && text == "" {
+		return ""
+	}
+
+	var prompt string
+	if active {
+		cursor := lipgloss.NewStyle().Foreground(tokenFgWarning).Render("/")
+		inputText := lipgloss.NewStyle().Foreground(tokenFgDefault).Render(text + "█")
+		prompt = cursor + " " + inputText
+	} else {
+		// Filter applied but bar hidden
+		badge := lipgloss.NewStyle().Foreground(tokenFgWarning).Render("[filter: " + text + "]")
+		prompt = badge
+	}
+
+	count := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render(fmt.Sprintf("Showing %d of %d", shown, total))
+
+	gap := width - lipgloss.Width(prompt) - lipgloss.Width(count) - 4
+	if gap < 1 {
+		gap = 1
+	}
+	line := "  " + prompt + strings.Repeat(" ", gap) + count
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("#1f2335")).
+		Width(width).
+		Render(line)
+}
+
+// ── Session table (k9s-style, 1 row per session) ─────────────────────
+
+var sortLabels = []string{"", "↑ status", "↑ cost", "↑ age", "↑ name"}
+
+const typeColWidth = 8 // "Claude  " fits in 8 chars
+
+func renderSessionTableHeader(width, sortMode int) string {
+	// indicator(2) + ST(2) + TYPE(typeColWidth) + AGO(5) + space(1)
+	nameWidth := width - 2 - 2 - typeColWidth - 5 - 1
+	if nameWidth < 8 {
+		nameWidth = 8
+	}
+
+	nameLabel := "NAME"
+	if sortMode > 0 && sortMode < len(sortLabels) {
+		nameLabel = "NAME (" + sortLabels[sortMode] + ")"
+	}
+
+	dim := lipgloss.NewStyle().Foreground(tokenFgMuted)
+	row := dim.Width(2).Render("") +
+		dim.Width(2).Render("") +
+		dim.Width(typeColWidth).Render("AI") +
+		dim.Width(nameWidth).Render(nameLabel) +
+		" " + dim.Width(4).Render("AGO")
+
+	return row
+}
+
+func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
+	// Selected indicator: bright left arrow (2 chars) vs padding
+	var indicator string
+	if selected {
+		indicator = lipgloss.NewStyle().Foreground(colorBorderHi).Bold(true).Render("▶ ")
+	} else {
+		indicator = "  "
+	}
+
 	icon := statusIcon(s.Status, blinkOn, spinnerIdx)
-	tIcon := typeIcon(s.ProcessType)
+	tStr := typeTag(s.ProcessType)
+
+	// indicator(2) + ST(2) + TYPE(typeColWidth) + AGO(5) + space(1)
+	nameWidth := width - 2 - 2 - typeColWidth - 5 - 1
+	if nameWidth < 8 {
+		nameWidth = 8
+	}
 
 	name := s.DisplayName()
-	if len(name) > 20 {
-		name = name[:20]
+	if len(name) > nameWidth {
+		name = name[:nameWidth-1] + "…"
 	}
 
-	line1 := fmt.Sprintf("%s %s %s",
-		icon, tIcon,
-		lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(name))
-
-	// Second line: metadata
-	var meta []string
-	if s.GitBranch != "" {
-		meta = append(meta, lipgloss.NewStyle().Foreground(colorDim).Render("⎇ "+s.GitBranch))
+	nameStyle := lipgloss.NewStyle().Width(nameWidth).Foreground(tokenFgDefault)
+	if selected {
+		nameStyle = nameStyle.Foreground(colorText).Bold(true)
 	}
-	if s.ContextPct > 0 {
-		pctColor := colorGreen
-		if s.ContextPct >= 80 {
-			pctColor = colorRed
-		} else if s.ContextPct >= 60 {
-			pctColor = colorYellow
-		}
-		meta = append(meta, lipgloss.NewStyle().Foreground(pctColor).Render(fmt.Sprintf("%d%%", s.ContextPct)))
-	}
-	if s.CostUSD > 0 {
-		costStr := lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf("$%.2f", s.CostUSD))
-		spark := sparkline(s.CostHistory)
-		if spark != "" {
-			costStr += " " + spark
-		}
-		meta = append(meta, costStr)
+	if s.Status == model.StatusNeedsAttention {
+		nameStyle = nameStyle.Foreground(tokenFgDanger).Bold(true)
+	} else if s.Status == model.StatusWorking && !selected {
+		nameStyle = nameStyle.Foreground(tokenFgInfo)
 	}
 
-	line2 := ""
-	if len(meta) > 0 {
-		line2 = lipgloss.NewStyle().PaddingLeft(4).Foreground(colorDim).
-			Render(strings.Join(meta, "  "))
-	}
+	ago := formatAge(s.LastChecked)
+	agoStr := lipgloss.NewStyle().Width(4).Foreground(tokenFgMuted).Render(ago)
 
-	content := line1
-	if line2 != "" {
-		content += "\n" + line2
-	}
-	if s.TaskSummary != "" {
-		task := s.TaskSummary
-		maxLen := width - 6
-		if maxLen < 10 {
-			maxLen = 10
-		}
-		if len(task) > maxLen {
-			task = task[:maxLen] + "…"
-		}
-		content += "\n" + lipgloss.NewStyle().PaddingLeft(4).Foreground(colorDim).Italic(true).
-			Render("» "+task)
-	}
+	stCol := lipgloss.NewStyle().Width(2).Render(icon)
+	typeCol := lipgloss.NewStyle().Width(typeColWidth).Render(tStr)
+	nameCol := nameStyle.Render(name)
+
+	row := indicator + stCol + typeCol + nameCol + " " + agoStr
 
 	if selected {
 		return lipgloss.NewStyle().
-			BorderLeft(true).
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderForeground(colorBlue).
-			PaddingLeft(1).
+			Background(lipgloss.Color("#1e3a5f")).
 			Width(width).
-			Render(content)
+			Render(row)
 	}
-	return lipgloss.NewStyle().PaddingLeft(3).Width(width).Render(content)
+	if s.Status == model.StatusNeedsAttention {
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("#2d1b1b")).
+			Width(width).
+			Render(row)
+	}
+	return lipgloss.NewStyle().Width(width).Render(row)
+}
+
+func typeTag(t model.ProcessType) string {
+	switch t {
+	case model.ProcessClaude:
+		return lipgloss.NewStyle().Foreground(colorMagenta).Bold(true).Render("Claude")
+	case model.ProcessKiro:
+		return lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Kiro")
+	case model.ProcessCodex:
+		return lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("Codex")
+	case model.ProcessOpencode:
+		return lipgloss.NewStyle().Foreground(colorOrange).Bold(true).Render("Open")
+	}
+	return lipgloss.NewStyle().Foreground(tokenFgMuted).Render("?")
+}
+
+func formatAge(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+}
+
+// ── Output tab ──────────────────────────────────────────────────────
+
+func renderOutputTab(a App, width, height int) string {
+	panelWidth := width - 4
+
+	var selected *model.SessionInfo
+	filtered := a.filteredSessions()
+	if a.selectedIdx < len(filtered) {
+		s := filtered[a.selectedIdx]
+		selected = &s
+	}
+
+	if selected == nil || selected.PaneContent == "" {
+		empty := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("\n  No pane content available")
+		return activePanelBorder.Width(panelWidth).Height(height).Render(empty)
+	}
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).
+		Render(selected.DisplayName()) + "  " + statusBadge(selected.Status)
+
+	paneLines := strings.Split(selected.PaneContent, "\n")
+	for len(paneLines) > 0 && strings.TrimSpace(paneLines[len(paneLines)-1]) == "" {
+		paneLines = paneLines[:len(paneLines)-1]
+	}
+
+	previewHeight := height - 4
+	if previewHeight < 3 {
+		previewHeight = 3
+	}
+	start := len(paneLines) - previewHeight
+	if start < 0 {
+		start = 0
+	}
+	preview := paneLines[start:]
+
+	maxLineWidth := panelWidth - 4
+	var colored []string
+	for _, pl := range preview {
+		if len(pl) > maxLineWidth {
+			pl = pl[:maxLineWidth]
+		}
+		colored = append(colored, colorPreviewLine(pl))
+	}
+
+	help := helpStyle.Render("j/k:navigate  ⏎:switch  y:yes  a:auto  !:esc  i:insert  ?:help")
+	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
+	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
 
 // ── Detail panel ────────────────────────────────────────────────────
@@ -177,7 +335,7 @@ func renderSessionRow(s model.SessionInfo, selected bool, blinkOn bool, spinnerI
 func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	if s == nil {
 		return panelHeadingStyle.Render("Overview") + "\n" +
-			lipgloss.NewStyle().Foreground(colorDim).
+			lipgloss.NewStyle().Foreground(tokenFgMuted).
 				Render("\n  No session selected")
 	}
 
@@ -190,8 +348,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 		typeName = "Opencode"
 	}
 
-	// Title + badge
-	title := lipgloss.NewStyle().Bold(true).Foreground(colorText).
+	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgDefault).
 		Render(s.DisplayName())
 	lines := []string{
 		panelHeadingStyle.Render("Overview"),
@@ -200,19 +357,17 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 		"",
 	}
 
-	// Metadata
 	lines = append(lines,
-		labelStyle.Render("Type:")+" "+lipgloss.NewStyle().Foreground(colorText).Render(typeName),
+		labelStyle.Render("Type:")+" "+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(typeName),
 	)
 	if s.Cwd != "" {
-		lines = append(lines, labelStyle.Render("Dir:")+" "+lipgloss.NewStyle().Foreground(colorText).Render(s.Cwd))
+		lines = append(lines, labelStyle.Render("Dir:")+" "+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(s.Cwd))
 	}
 	if s.GitBranch != "" {
 		lines = append(lines, labelStyle.Render("Branch:")+" "+
-			lipgloss.NewStyle().Foreground(colorMagenta).Render("⎇ "+s.GitBranch))
+			lipgloss.NewStyle().Foreground(colorMagenta).Render("⎇ "+sanitizeField(s.GitBranch)))
 	}
 
-	// Divider + context bar
 	lines = append(lines, "", divider(40))
 
 	if s.ContextPct > 0 || s.ContextTokens > 0 {
@@ -221,12 +376,12 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			labelStyle.Render("Context:")+" "+renderContextBar(s.ContextPct, 24))
 		lines = append(lines,
 			strings.Repeat(" ", 10)+
-				lipgloss.NewStyle().Foreground(colorDim).
+				lipgloss.NewStyle().Foreground(tokenFgMuted).
 					Render(fmt.Sprintf("%d / %d tokens", s.ContextTokens, s.ContextMax)))
 	}
 
 	if s.CostUSD > 0 {
-		costStr := lipgloss.NewStyle().Foreground(colorYellow).Bold(true).
+		costStr := lipgloss.NewStyle().Foreground(tokenFgWarning).Bold(true).
 			Render(fmt.Sprintf("$%.2f", s.CostUSD))
 		spark := sparkline(s.CostHistory)
 		if spark != "" {
@@ -236,24 +391,23 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	}
 
 	if s.LastActivity != "" {
-		activity := s.LastActivity
+		activity := sanitizeField(s.LastActivity)
 		if len(activity) > 80 {
 			activity = activity[:80] + "…"
 		}
 		lines = append(lines, "",
-			lipgloss.NewStyle().Foreground(colorDim).Italic(true).
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
 				Render("Last: "+activity))
 	}
 
-	// Task summary
 	if s.TaskSummary != "" {
-		task := s.TaskSummary
+		task := sanitizeField(s.TaskSummary)
 		if len(task) > 76 {
 			task = task[:76] + "…"
 		}
 		lines = append(lines, "",
-			lipgloss.NewStyle().Foreground(colorCyan).Bold(true).Render("Task: ")+
-				lipgloss.NewStyle().Foreground(colorText).Render(task))
+			lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render("Task: ")+
+				lipgloss.NewStyle().Foreground(tokenFgDefault).Render(task))
 	}
 
 	// Pane preview
@@ -277,7 +431,6 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 		}
 		preview := paneLines[start:]
 
-		// Syntax-aware line coloring
 		var colored []string
 		for _, pl := range preview {
 			if len(pl) > 76 {
@@ -290,7 +443,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 		}
 
 		boxStyle := previewBorder
-		boxLabel := lipgloss.NewStyle().Foreground(colorDim).Render(" Preview ")
+		boxLabel := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(" Preview ")
 		if insertMode {
 			boxStyle = boxStyle.BorderForeground(colorYellow)
 			boxLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render(" INSERT ")
@@ -307,7 +460,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			lipgloss.NewStyle().Bold(true).Foreground(colorYellow).
 				Render("── INSERT ──  type to send to pane  Esc: exit"))
 	} else {
-		parts := []string{"i:insert", "y/a/!:respond", "j/k:nav", "⏎:switch", "tab:panels", "n:notify", "r:refresh", "q:quit"}
+		parts := []string{"i:insert", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
 		lines = append(lines, "", helpStyle.Render(strings.Join(parts, "  ")))
 	}
 
@@ -322,19 +475,115 @@ func colorPreviewLine(line string) string {
 	trimmed := strings.TrimSpace(line)
 	switch {
 	case strings.Contains(line, "❯"):
-		return lipgloss.NewStyle().Foreground(colorGreen).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgSuccess).Render(line)
 	case attentionRe.MatchString(line):
-		return lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgDanger).Bold(true).Render(line)
 	case strings.HasPrefix(trimmed, "│") || strings.HasPrefix(trimmed, "├") || strings.HasPrefix(trimmed, "└"):
-		return lipgloss.NewStyle().Foreground(colorDim).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgMuted).Render(line)
 	case strings.HasPrefix(trimmed, "✓") || strings.HasPrefix(trimmed, "✔"):
-		return lipgloss.NewStyle().Foreground(colorGreen).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgSuccess).Render(line)
 	case strings.HasPrefix(trimmed, "✗") || strings.HasPrefix(trimmed, "✘") || strings.HasPrefix(trimmed, "error"):
-		return lipgloss.NewStyle().Foreground(colorRed).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgDanger).Render(line)
 	case strings.HasPrefix(trimmed, "λ") || strings.HasPrefix(trimmed, ">"):
-		return lipgloss.NewStyle().Foreground(colorCyan).Render(line)
+		return lipgloss.NewStyle().Foreground(tokenFgAccent).Render(line)
 	}
-	return lipgloss.NewStyle().Foreground(colorText).Render(line)
+	return lipgloss.NewStyle().Foreground(tokenFgDefault).Render(line)
+}
+
+// ── Help overlay ────────────────────────────────────────────────────
+
+func renderHelpOverlay(width, height int) string {
+	col1 := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Global"),
+		kv("q / Ctrl+C", "quit"),
+		kv("1 / 2 / 3", "switch tabs"),
+		kv("Tab", "next tab"),
+		kv("?", "toggle help"),
+		kv("r", "refresh sessions"),
+		kv("n", "toggle notify"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Session Actions"),
+		kv("j / k", "navigate"),
+		kv("g / G", "top / bottom"),
+		kv("Enter", "switch to pane"),
+		kv("y", "send Enter (yes)"),
+		kv("a", "send 'a' (auto)"),
+		kv("!", "send Escape *"),
+		kv("i", "insert mode"),
+	}
+	col2 := []string{
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Filter & Sort"),
+		kv("/", "open filter"),
+		kv("Esc", "close filter (keep)"),
+		kv("s", "cycle sort order"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Todos (tab 2)"),
+		kv("j / k", "navigate"),
+		kv("i", "add new todo"),
+		kv("Enter", "mark done"),
+		kv("d / x", "delete"),
+		kv("Esc", "exit insert"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Insert Mode"),
+		kv("type", "send key to pane"),
+		kv("Enter", "send Enter"),
+		kv("Esc", "exit insert"),
+		lipgloss.NewStyle().Foreground(tokenFgMuted).Render("* requires confirmation"),
+	}
+
+	maxRows := len(col1)
+	if len(col2) > maxRows {
+		maxRows = len(col2)
+	}
+
+	colW := 32
+	var rows []string
+	for i := 0; i < maxRows; i++ {
+		left := ""
+		if i < len(col1) {
+			left = col1[i]
+		}
+		right := ""
+		if i < len(col2) {
+			right = col2[i]
+		}
+		leftPadded := lipgloss.NewStyle().Width(colW).Render(left)
+		rows = append(rows, leftPadded+"  "+right)
+	}
+
+	content := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tokenBorderFocused).
+		Padding(1, 2).
+		Render(
+			lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("  Help  ") + "\n\n" +
+				strings.Join(rows, "\n") + "\n\n" +
+				lipgloss.NewStyle().Foreground(tokenFgMuted).Render("? or Esc to close"),
+		)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func kv(key, desc string) string {
+	k := lipgloss.NewStyle().Foreground(tokenFgWarning).Bold(true).Render(fmt.Sprintf("%-12s", key))
+	d := lipgloss.NewStyle().Foreground(tokenFgDefault).Render(desc)
+	return k + " " + d
+}
+
+// ── Confirm modal ────────────────────────────────────────────────────
+
+func renderConfirmModal(msg string, width, height int) string {
+	line1 := lipgloss.NewStyle().Foreground(tokenFgDefault).Render(msg)
+	line2 := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render("    [y] confirm   [Esc / n] cancel")
+
+	content := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tokenFgDanger).
+		Padding(1, 3).
+		Render(line1 + "\n\n" + line2)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // ── Todos ───────────────────────────────────────────────────────────
@@ -349,14 +598,14 @@ func renderTodos(s *model.SessionInfo, shared *model.ProjectTodos, internal []mo
 	hasInternal := len(internal) > 0
 
 	if !hasShared && !hasInternal {
-		return lipgloss.NewStyle().Foreground(colorDim).
+		return lipgloss.NewStyle().Foreground(tokenFgMuted).
 			Render(fmt.Sprintf("Todos: none for %s", projectName))
 	}
 
 	var lines []string
 	lines = append(lines,
-		lipgloss.NewStyle().Bold(true).Foreground(colorText).Render("Todos")+
-			lipgloss.NewStyle().Foreground(colorDim).Render(fmt.Sprintf(" (%s)", projectName)))
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgDefault).Render("Todos")+
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(fmt.Sprintf(" (%s)", projectName)))
 
 	if hasShared {
 		for _, item := range shared.Items {
@@ -367,15 +616,15 @@ func renderTodos(s *model.SessionInfo, shared *model.ProjectTodos, internal []mo
 			}
 			switch item.Status {
 			case model.TodoDone:
-				text = lipgloss.NewStyle().Foreground(colorDim).Strikethrough(true).Render(text)
+				text = lipgloss.NewStyle().Foreground(tokenFgMuted).Strikethrough(true).Render(text)
 			case model.TodoInProgress:
-				text = lipgloss.NewStyle().Foreground(colorCyan).Render(text)
+				text = lipgloss.NewStyle().Foreground(tokenFgAccent).Render(text)
 			default:
-				text = lipgloss.NewStyle().Foreground(colorText).Render(text)
+				text = lipgloss.NewStyle().Foreground(tokenFgDefault).Render(text)
 			}
 			tags := ""
 			if len(item.Tags) > 0 {
-				tags = lipgloss.NewStyle().Foreground(colorDim).
+				tags = lipgloss.NewStyle().Foreground(tokenFgMuted).
 					Render(" [" + strings.Join(item.Tags, ", ") + "]")
 			}
 			lines = append(lines, fmt.Sprintf("  %s %s%s", icon, text, tags))
@@ -387,7 +636,7 @@ func renderTodos(s *model.SessionInfo, shared *model.ProjectTodos, internal []mo
 			lines = append(lines, "")
 		}
 		lines = append(lines,
-			lipgloss.NewStyle().Foreground(colorDim).Italic(true).
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
 				Render("  Session internal todos:"))
 		for _, item := range internal {
 			icon := todoIcon(item.Status)
@@ -396,7 +645,7 @@ func renderTodos(s *model.SessionInfo, shared *model.ProjectTodos, internal []mo
 				text = text[:55]
 			}
 			lines = append(lines, fmt.Sprintf("  %s %s",
-				icon, lipgloss.NewStyle().Foreground(colorDim).Render(text)))
+				icon, lipgloss.NewStyle().Foreground(tokenFgMuted).Render(text)))
 		}
 	}
 

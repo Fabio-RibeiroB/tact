@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,12 +25,20 @@ type paneUpdateMsg []model.SessionInfo
 type costUpdateMsg []model.SessionInfo
 type todoStrikeMsg string // carries todo ID to remove after strike animation
 
-// Focus panels
+// Tabs
 const (
-	panelSessions = iota
-	panelTodos
-	panelDetail
-	panelCount
+	tabSessions = iota
+	tabTodos
+	tabOutput
+)
+
+// Sort modes
+const (
+	sortDefault = iota // discovery order
+	sortStatus         // attention → working → idle → disconnected
+	sortCost           // highest cost first
+	sortAge            // most recently active first
+	sortName           // alphabetical
 )
 
 // App is the root Bubble Tea model.
@@ -36,7 +46,6 @@ type App struct {
 	sessions      []model.SessionInfo
 	selectedIdx   int
 	width, height int
-	focusPanel    int  // panelSessions, panelTodos, panelDetail
 	prevStatuses  map[string]model.SessionStatus
 	discovering   bool
 	notifyEnabled bool
@@ -49,21 +58,46 @@ type App struct {
 	insertMode bool
 
 	// Todo state
-	todos        []model.TodoItem // current project's todos
-	todoSlug     string           // current project slug
-	todoIdx      int              // selected todo index
-	todoInput    string           // text being typed in todo insert mode
-	todoInsert   bool             // true = typing a new todo
-	strikingID   string           // todo ID currently showing strikethrough
+	todos      []model.TodoItem // current project's todos
+	todoSlug   string           // current project slug
+	todoIdx    int              // selected todo index
+	todoInput  string           // text being typed in todo insert mode
+	todoInsert bool             // true = typing a new todo
+	strikingID string           // todo ID currently showing strikethrough
+
+	// Tabs
+	activeTab int // tabSessions, tabTodos, tabOutput
+
+	// Filter and sort
+	filterActive bool
+	filterText   string
+	sortMode     int // sortDefault..sortName
+
+	// Overlays
+	showHelp   bool
+	confirmMsg string // non-empty = confirm modal visible
+	confirmCmd string // action to execute on confirm
+
+	// Environment
+	sshSafe bool
 }
 
 func newApp() App {
-	return App{
-		focusPanel:    panelSessions,
+	a := App{
+		activeTab:     tabSessions,
 		notifyEnabled: true,
 		prevStatuses:  make(map[string]model.SessionStatus),
 		blinkOn:       true,
 	}
+	if isSSH() {
+		a.sshSafe = true
+		animIntervalDuration = 100 * time.Millisecond // 10 FPS cap
+	}
+	return a
+}
+
+func isSSH() bool {
+	return os.Getenv("SSH_TTY") != "" || os.Getenv("SSH_CLIENT") != ""
 }
 
 func (a App) Init() tea.Cmd {
@@ -74,10 +108,10 @@ func (a App) Init() tea.Cmd {
 	)
 }
 
-const animInterval = 150 * time.Millisecond
+var animIntervalDuration = 150 * time.Millisecond
 
 func animTick() tea.Cmd {
-	return tea.Tick(animInterval, func(t time.Time) tea.Msg {
+	return tea.Tick(animIntervalDuration, func(t time.Time) tea.Msg {
 		return animTickMsg(t)
 	})
 }
@@ -102,8 +136,8 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 				s.Status = model.StatusDisconnected
 				continue
 			}
-			// Store cleaned content for preview (strip ANSI codes)
-			s.PaneContent = ansiRe.ReplaceAllString(content, "")
+			// Store cleaned content for preview (strip ANSI and control sequences)
+			s.PaneContent = StripControlSequences(content)
 			clean := s.PaneContent
 			s.Status = parser.DetectStatus(clean, title, s.ProcessType)
 			if s.ProcessType == model.ProcessClaude {
@@ -117,10 +151,10 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 					s.ContextMax = cs.ContextMax
 				}
 				if cs.GitBranch != "" {
-					s.GitBranch = cs.GitBranch
+					s.GitBranch = sanitizeField(cs.GitBranch)
 				}
 				if cs.ProjectName != "" {
-					s.ProjectName = cs.ProjectName
+					s.ProjectName = sanitizeField(cs.ProjectName)
 				}
 			}
 			if s.ProcessType == model.ProcessKiro {
@@ -128,19 +162,19 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 					s.ContextPct = pct
 				}
 			}
-		if s.ProcessType == model.ProcessCodex {
-			if pct := parser.ParseCodexContext(clean); pct > 0 {
-				s.ContextPct = pct
+			if s.ProcessType == model.ProcessCodex {
+				if pct := parser.ParseCodexContext(clean); pct > 0 {
+					s.ContextPct = pct
+				}
 			}
-		}
-		if s.ProcessType == model.ProcessOpencode {
-			if pct := parser.ParseOpencodeContext(clean); pct > 0 {
-				s.ContextPct = pct
+			if s.ProcessType == model.ProcessOpencode {
+				if pct := parser.ParseOpencodeContext(clean); pct > 0 {
+					s.ContextPct = pct
+				}
 			}
-		}
-		if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
-			s.TaskSummary = task
-		}
+			if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
+				s.TaskSummary = sanitizeField(task)
+			}
 			s.LastChecked = time.Now()
 		}
 		return paneUpdateMsg(sessions)
@@ -157,13 +191,13 @@ func doCostUpdate(sessions []model.SessionInfo) tea.Cmd {
 					s.CostUSD = data.Cost.TotalUSD
 				}
 				if data.LastMessage != "" {
-					s.LastActivity = data.LastMessage
+					s.LastActivity = sanitizeField(data.LastMessage)
 				}
 				if s.TaskSummary == "" {
 					if data.FirstHumanMessage != "" {
-						s.TaskSummary = data.FirstHumanMessage
+						s.TaskSummary = sanitizeField(data.FirstHumanMessage)
 					} else if data.LastHumanMessage != "" {
-						s.TaskSummary = data.LastHumanMessage
+						s.TaskSummary = sanitizeField(data.LastHumanMessage)
 					}
 				}
 			}
@@ -188,6 +222,17 @@ var (
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Priority: confirm modal > help overlay > filter > todo insert > insert > normal
+		if a.confirmMsg != "" {
+			return a.handleConfirmKey(msg)
+		}
+		if a.showHelp {
+			a.showHelp = false
+			return a, nil
+		}
+		if a.filterActive {
+			return a.handleFilterKey(msg)
+		}
 		if a.todoInsert {
 			return a.handleTodoInsertKey(msg)
 		}
@@ -268,56 +313,93 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	k := msg.String()
+
+	// Global keys
+	switch k {
 	case "q", "ctrl+c":
 		return a, tea.Quit
 	case "tab":
-		a.focusPanel = (a.focusPanel + 1) % panelCount
+		a.activeTab = (a.activeTab + 1) % 3
 		a.refreshTodos()
+		return *a, nil
 	case "shift+tab":
-		a.focusPanel = (a.focusPanel + panelCount - 1) % panelCount
+		a.activeTab = (a.activeTab + 2) % 3
 		a.refreshTodos()
+		return *a, nil
+	case "1":
+		a.activeTab = tabSessions
+		a.refreshTodos()
+		return *a, nil
+	case "2":
+		a.activeTab = tabTodos
+		a.refreshTodos()
+		return *a, nil
+	case "3":
+		a.activeTab = tabOutput
+		if s := a.selectedSession(); s != nil {
+			return *a, doPaneUpdate([]model.SessionInfo{*s})
+		}
+		return *a, nil
 	case "r":
 		return *a, doDiscovery
 	case "n":
 		a.notifyEnabled = !a.notifyEnabled
+		return *a, nil
+	case "?":
+		a.showHelp = !a.showHelp
+		return *a, nil
+	case "/":
+		a.filterActive = true
+		a.filterText = ""
+		return *a, nil
+	case "s":
+		if !a.filterActive {
+			a.sortMode = (a.sortMode + 1) % 5
+		}
+		return *a, nil
 	}
 
-	// Panel-specific keys
-	switch a.focusPanel {
-	case panelSessions:
+	// Tab-specific keys
+	switch a.activeTab {
+	case tabSessions, tabOutput:
 		return a.handleSessionKey(msg)
-	case panelTodos:
+	case tabTodos:
 		return a.handleTodoKey(msg)
-	case panelDetail:
-		return a.handleDetailKey(msg)
 	}
 	return *a, nil
 }
 
 func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	filtered := a.filteredSessions()
 	switch msg.String() {
 	case "j", "down":
-		if a.selectedIdx < len(a.sessions)-1 {
+		if a.selectedIdx < len(filtered)-1 {
 			a.selectedIdx++
 			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
 		}
 	case "k", "up":
 		if a.selectedIdx > 0 {
 			a.selectedIdx--
 			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
 		}
 	case "g", "home":
 		a.selectedIdx = 0
 		a.refreshTodos()
+		if len(filtered) > 0 {
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[0]})
+		}
 	case "G", "end":
-		if len(a.sessions) > 0 {
-			a.selectedIdx = len(a.sessions) - 1
+		if len(filtered) > 0 {
+			a.selectedIdx = len(filtered) - 1
 			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
 		}
 	case "enter":
-		if a.selectedIdx < len(a.sessions) {
-			tmux.SwitchToPane(a.sessions[a.selectedIdx].PaneID)
+		if a.selectedIdx < len(filtered) {
+			tmux.SwitchToPane(filtered[a.selectedIdx].PaneID)
 		}
 	case "y":
 		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
@@ -329,7 +411,8 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "!":
 		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
-			tmux.SendKeys(s.PaneID, "Escape")
+			a.confirmMsg = fmt.Sprintf("Send Escape to '%s'?", s.DisplayName())
+			a.confirmCmd = "send_escape"
 		}
 	case "i":
 		if a.selectedSession() != nil {
@@ -353,34 +436,14 @@ func (a *App) handleTodoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.todoInsert = true
 		a.todoInput = ""
 	case "enter":
-		// Strike out then dismiss
 		if a.todoIdx < len(a.todos) && a.strikingID == "" {
 			id := a.todos[a.todoIdx].ID
 			a.strikingID = id
 			return *a, todoStrikeAfter(id, 400*time.Millisecond)
 		}
 	case "d", "x":
-		// Immediate delete
 		if a.todoIdx < len(a.todos) {
 			a.removeTodo(a.todos[a.todoIdx].ID)
-		}
-	}
-	return *a, nil
-}
-
-func (a *App) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "i":
-		if a.selectedSession() != nil {
-			a.insertMode = true
-		}
-	case "y":
-		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
-			tmux.SendKeys(s.PaneID, "Enter")
-		}
-	case "a":
-		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
-			tmux.SendKeys(s.PaneID, "a")
 		}
 	}
 	return *a, nil
@@ -439,6 +502,100 @@ func (a *App) handleTodoInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return *a, nil
 }
 
+func (a *App) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		a.filterActive = false // hide bar but keep filter applied
+	case tea.KeyEnter:
+		a.filterActive = false
+	case tea.KeyBackspace:
+		if len(a.filterText) > 0 {
+			a.filterText = a.filterText[:len(a.filterText)-1]
+		}
+	default:
+		if r := msg.String(); len(r) == 1 {
+			a.filterText += r
+		}
+	}
+	// Clamp selected index to filtered list
+	filtered := a.filteredSessions()
+	if a.selectedIdx >= len(filtered) && len(filtered) > 0 {
+		a.selectedIdx = len(filtered) - 1
+	}
+	return *a, nil
+}
+
+func (a *App) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		if a.confirmCmd == "send_escape" {
+			if s := a.selectedSession(); s != nil {
+				tmux.SendKeys(s.PaneID, "Escape")
+			}
+		}
+		a.confirmMsg = ""
+		a.confirmCmd = ""
+	case "n", "escape":
+		a.confirmMsg = ""
+		a.confirmCmd = ""
+	}
+	return *a, nil
+}
+
+// ── Filter and sort ──────────────────────────────────────────────
+
+func (a *App) filteredSessions() []model.SessionInfo {
+	sessions := make([]model.SessionInfo, len(a.sessions))
+	copy(sessions, a.sessions)
+
+	if a.filterText != "" {
+		lower := strings.ToLower(a.filterText)
+		var filtered []model.SessionInfo
+		for _, s := range sessions {
+			if strings.Contains(strings.ToLower(s.DisplayName()), lower) ||
+				strings.Contains(strings.ToLower(s.GitBranch), lower) ||
+				strings.Contains(strings.ToLower(s.TaskSummary), lower) {
+				filtered = append(filtered, s)
+			}
+		}
+		sessions = filtered
+	}
+
+	switch a.sortMode {
+	case sortStatus:
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return statusPriority(sessions[i].Status) < statusPriority(sessions[j].Status)
+		})
+	case sortCost:
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].CostUSD > sessions[j].CostUSD
+		})
+	case sortAge:
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].LastChecked.After(sessions[j].LastChecked)
+		})
+	case sortName:
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].DisplayName() < sessions[j].DisplayName()
+		})
+	}
+	return sessions
+}
+
+func statusPriority(s model.SessionStatus) int {
+	switch s {
+	case model.StatusNeedsAttention:
+		return 0
+	case model.StatusWorking:
+		return 1
+	case model.StatusIdle:
+		return 2
+	case model.StatusDisconnected:
+		return 3
+	}
+	return 4
+}
+
 // ── Todo helpers ─────────────────────────────────────────────────
 
 func (a *App) currentProjectSlug() string {
@@ -462,7 +619,6 @@ func (a *App) refreshTodos() {
 	}
 	a.todoSlug = slug
 	pt := todo.LoadProjectTodos(slug)
-	// Filter out done items (they've been dismissed)
 	var active []model.TodoItem
 	for _, item := range pt.Items {
 		if item.Status != model.TodoDone {
@@ -551,8 +707,15 @@ func (a *App) mergeSessions(updated []model.SessionInfo) {
 }
 
 func (a *App) selectedSession() *model.SessionInfo {
-	if a.selectedIdx < len(a.sessions) {
-		return &a.sessions[a.selectedIdx]
+	filtered := a.filteredSessions()
+	if a.selectedIdx < len(filtered) {
+		// Find the matching session in a.sessions
+		paneID := filtered[a.selectedIdx].PaneID
+		for i := range a.sessions {
+			if a.sessions[i].PaneID == paneID {
+				return &a.sessions[i]
+			}
+		}
 	}
 	return nil
 }
@@ -583,75 +746,105 @@ func (a App) View() string {
 	}
 
 	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession())
+	tabBar := renderTabBar(a.activeTab, a.width)
+	headerLines := strings.Count(header, "\n") + 1
 
+	filtered := a.filteredSessions()
+	filterBar := renderFilterBar(a.filterActive, a.filterText, len(a.sessions), len(filtered), a.width)
+	filterBarLines := 0
+	if filterBar != "" {
+		filterBarLines = 1
+	}
+
+	// bodyHeight accounts for: header + tab bar (1) + filter bar (0-1) + borders (2)
+	bodyHeight := a.height - headerLines - 1 - filterBarLines - 2
+
+	var body string
+	switch a.activeTab {
+	case tabTodos:
+		body = a.renderTodosFullTab(bodyHeight)
+	case tabOutput:
+		body = renderOutputTab(a, a.width, bodyHeight)
+	default: // tabSessions
+		body = a.renderSessionsBody(filtered, bodyHeight)
+	}
+
+	parts := []string{header, tabBar}
+	if filterBar != "" {
+		parts = append(parts, filterBar)
+	}
+	parts = append(parts, body)
+	view := strings.Join(parts, "\n")
+
+	if a.showHelp {
+		return renderHelpOverlay(a.width, a.height)
+	}
+	if a.confirmMsg != "" {
+		return renderConfirmModal(a.confirmMsg, a.width, a.height)
+	}
+	return view
+}
+
+func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) string {
 	leftWidth := a.width * 3 / 10
 	if leftWidth < 25 {
 		leftWidth = 25
 	}
 	rightWidth := a.width - leftWidth - 4
-	headerLines := strings.Count(header, "\n") + 1
-	bodyHeight := a.height - headerLines - 2
 
-	// Dynamic left panel split: sessions + todos
-	todoFocused := a.focusPanel == panelTodos
-	todoHeight := a.todoSectionHeight(bodyHeight, todoFocused)
-	sessionHeight := bodyHeight - todoHeight - 2 // -2 for todo border
+	// Small todo section always collapsed at bottom of left panel
+	todoHeight := a.todoSectionHeight(bodyHeight, false)
+	sessionHeight := bodyHeight - todoHeight - 2
 
-	// Session list
+	// Sessions table
 	var listLines []string
-	for i, s := range a.sessions {
-		listLines = append(listLines, renderSessionRow(s, i == a.selectedIdx && a.focusPanel == panelSessions, a.blinkOn, a.spinnerIdx, leftWidth-2))
+	listLines = append(listLines, renderSessionTableHeader(leftWidth-2, a.sortMode))
+	for i, s := range filtered {
+		listLines = append(listLines, renderSessionTableRow(s, i == a.selectedIdx, a.blinkOn, a.spinnerIdx, leftWidth-2))
 	}
-	if len(listLines) == 0 {
-		listLines = append(listLines, lipgloss.NewStyle().Foreground(colorDim).Render("  No sessions found"))
+	if len(filtered) == 0 {
+		noSess := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  No sessions found")
+		if a.filterText != "" {
+			noSess = lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  No sessions match filter")
+		}
+		listLines = append(listLines, noSess)
 	}
-	listContent := panelHeadingStyle.Render("Your AI sessions") + "\n" + strings.Join(listLines, "\n")
+	listContent := strings.Join(listLines, "\n")
+	sessionPanel := activePanelBorder.Width(leftWidth).Height(sessionHeight).Render(listContent)
 
-	sessionBorder := panelBorder
-	if a.focusPanel == panelSessions {
-		sessionBorder = activePanelBorder
-	}
-	sessionPanel := sessionBorder.Width(leftWidth).Height(sessionHeight).Render(listContent)
-
-	// Todo panel
-	todoContent := a.renderTodoPanel(leftWidth-2, todoHeight, todoFocused)
-	todoBorder := panelBorder
-	if todoFocused {
-		todoBorder = activePanelBorder
-	}
-	todoPanel := todoBorder.Width(leftWidth).Height(todoHeight).Render(todoContent)
+	// Todo section (read-only in sessions tab; press 2 to manage)
+	todoContent := a.renderTodoPanel(leftWidth-2, todoHeight, false)
+	todoPanel := panelBorder.Width(leftWidth).Height(todoHeight).Render(todoContent)
 
 	leftPanel := lipgloss.JoinVertical(lipgloss.Left, sessionPanel, todoPanel)
 
 	// Right panel: detail
 	var selected *model.SessionInfo
-	if a.selectedIdx < len(a.sessions) {
-		s := a.sessions[a.selectedIdx]
+	if a.selectedIdx < len(filtered) {
+		s := filtered[a.selectedIdx]
 		selected = &s
 	}
 	detailContent := renderDetail(selected, bodyHeight, a.insertMode)
+	rightPanel := panelBorder.Width(rightWidth).Height(bodyHeight).Render(detailContent)
 
-	rightBorder := panelBorder
-	if a.focusPanel == panelDetail {
-		rightBorder = activePanelBorder
-	}
-	rightPanel := rightBorder.Width(rightWidth).Height(bodyHeight).Render(detailContent)
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+}
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-
-	return fmt.Sprintf("%s\n%s", header, body)
+func (a App) renderTodosFullTab(height int) string {
+	width := a.width - 4
+	content := a.renderTodoPanel(width-2, height-2, true)
+	return activePanelBorder.Width(width).Height(height).Render(content)
 }
 
 func (a *App) todoSectionHeight(totalHeight int, focused bool) int {
 	if focused {
-		// Expand: at least 40% of left panel or enough for items + input
 		h := totalHeight * 4 / 10
-		needed := len(a.todos) + 3 // items + header + input + padding
+		needed := len(a.todos) + 3
 		if needed > h {
 			h = needed
 		}
 		if h > totalHeight-6 {
-			h = totalHeight - 6 // leave room for at least a few session rows
+			h = totalHeight - 6
 		}
 		return max(h, 4)
 	}
@@ -660,13 +853,12 @@ func (a *App) todoSectionHeight(totalHeight int, focused bool) int {
 	if items > 3 {
 		items = 3
 	}
-	return max(items+2, 3) // header + items + hint
+	return max(items+2, 3)
 }
 
 func (a *App) renderTodoPanel(width, height int, focused bool) string {
 	var lines []string
 
-	// Header
 	count := len(a.todos)
 	headerText := fmt.Sprintf("Todos (%d)", count)
 	if a.todoSlug != "" {
@@ -675,28 +867,34 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 	if len(headerText) > width-2 {
 		headerText = fmt.Sprintf("Todos (%d)", count)
 	}
-	hdrStyle := lipgloss.NewStyle().Bold(true).Foreground(colorDim)
+	hdrStyle := lipgloss.NewStyle().Bold(true).Foreground(tokenFgMuted)
 	if focused {
-		hdrStyle = hdrStyle.Foreground(colorCyan)
+		hdrStyle = hdrStyle.Foreground(tokenFgAccent)
 	}
 	lines = append(lines, hdrStyle.Render(headerText))
 
+	if !focused {
+		// In sessions tab: show hint to switch to todos tab
+		lines = append(lines, lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  2:manage todos"))
+	}
+
 	if len(a.todos) == 0 && !a.todoInsert {
-		lines = append(lines, lipgloss.NewStyle().Foreground(colorDim).Italic(true).
+		lines = append(lines, lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
 			Render("  (empty)"))
 	}
 
-	// Items
-	maxItems := height - 2 // header + input line
+	maxItems := height - 2
 	if a.todoInsert {
 		maxItems--
+	}
+	if !focused {
+		maxItems = 3 // always collapsed in sessions tab
 	}
 	if maxItems < 0 {
 		maxItems = 0
 	}
 	visible := a.todos
 	if len(visible) > maxItems {
-		// Scroll to keep selected visible
 		start := a.todoIdx - maxItems + 1
 		if start < 0 {
 			start = 0
@@ -712,14 +910,14 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 		striking := item.ID == a.strikingID
 
 		bullet := "○"
-		style := lipgloss.NewStyle().Foreground(colorText)
+		style := lipgloss.NewStyle().Foreground(tokenFgDefault)
 
 		if striking {
 			bullet = "●"
-			style = style.Foreground(colorDim).Strikethrough(true)
+			style = style.Foreground(tokenFgMuted).Strikethrough(true)
 		} else if selected {
 			bullet = "›"
-			style = style.Foreground(colorCyan)
+			style = style.Foreground(tokenFgAccent)
 		}
 
 		text := item.Text
@@ -733,22 +931,21 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 
 		prefix := "  "
 		if selected {
-			prefix = lipgloss.NewStyle().Foreground(colorCyan).Render("▎ ")
+			prefix = lipgloss.NewStyle().Foreground(tokenFgAccent).Render("▎ ")
 		}
-		lines = append(lines, prefix+lipgloss.NewStyle().Foreground(colorDim).Render(bullet)+" "+style.Render(text))
+		lines = append(lines, prefix+lipgloss.NewStyle().Foreground(tokenFgMuted).Render(bullet)+" "+style.Render(text))
 	}
 
-	// Insert line
 	if a.todoInsert {
 		cursor := lipgloss.NewStyle().Foreground(colorYellow).Render("▎ + ")
 		input := a.todoInput
 		if len(input) > width-6 {
 			input = input[len(input)-width+6:]
 		}
-		lines = append(lines, cursor+lipgloss.NewStyle().Foreground(colorText).Render(input+"█"))
+		lines = append(lines, cursor+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(input+"█"))
 	} else if focused && len(lines) < height {
 		lines = append(lines,
-			lipgloss.NewStyle().Foreground(colorDim).Render("  i:add  ⏎:done  d:del"))
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  i:add  ⏎:done  d:del"))
 	}
 
 	return strings.Join(lines, "\n")

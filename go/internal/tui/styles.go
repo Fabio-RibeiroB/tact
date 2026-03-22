@@ -26,6 +26,21 @@ var (
 	colorOrange   = lipgloss.Color("#ff9e64")
 )
 
+// ── Semantic design tokens ───────────────────────────────────────────
+// Map semantic intent to palette. Change a token here to change it everywhere.
+var (
+	tokenFgDefault      = colorText
+	tokenFgMuted        = colorDim
+	tokenFgDanger       = colorRed
+	tokenFgWarning      = colorYellow
+	tokenFgSuccess      = colorGreen
+	tokenFgInfo         = colorBlue
+	tokenFgAccent       = colorCyan
+	tokenBgSelected     = lipgloss.Color("#2a2c3d")
+	tokenBorderFocused  = colorBorderHi
+	tokenBorderInactive = colorBorder
+)
+
 // ── Reusable styles ─────────────────────────────────────────────────
 var (
 	panelBorder = lipgloss.NewStyle().
@@ -63,10 +78,11 @@ func statusIcon(s model.SessionStatus, blinkOn bool, spinnerIdx int) string {
 		frame := workingSpinner[spinnerIdx%len(workingSpinner)]
 		return lipgloss.NewStyle().Foreground(colorBlue).Render(frame)
 	case model.StatusNeedsAttention:
+		// Always red — blink between bold ◉ and dim ◉ so it's never invisible
 		if blinkOn {
 			return lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render("◉")
 		}
-		return lipgloss.NewStyle().Foreground(colorOrange).Render("○")
+		return lipgloss.NewStyle().Foreground(colorRed).Render("◉")
 	case model.StatusDisconnected:
 		return lipgloss.NewStyle().Foreground(colorDim).Render("○")
 	}
