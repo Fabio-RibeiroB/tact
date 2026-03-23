@@ -216,7 +216,7 @@ var (
 	pollCount    int
 	discoveryDue int
 	costDue      int
-	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	ansiRe       = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[?!>]?[0-9;]*[a-zA-Z~])`)
 )
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -779,9 +779,16 @@ func (a *App) checkNotifications() {
 
 // ── View ─────────────────────────────────────────────────────────
 
+const minWidth = 60
+const minHeight = 12
+
 func (a App) View() string {
 	if a.width == 0 {
 		return "Loading..."
+	}
+
+	if a.width < minWidth || a.height < minHeight {
+		return renderTooSmall(a.width, a.height)
 	}
 
 	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession())
