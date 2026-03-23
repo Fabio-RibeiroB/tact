@@ -18,10 +18,3 @@ release:
     owner: Fabio-RibeiroB
     name: tact
 
-brews:
-  - repository:
-      owner: Fabio-RibeiroB
-      name: homebrew-tap
-    name: tact
-    homepage: https://github.com/Fabio-RibeiroB/tact
-    description: Control tower for AI coding sessions
