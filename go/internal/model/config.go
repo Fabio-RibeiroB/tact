@@ -26,5 +26,5 @@ func homeDir() string {
 }
 
 func EnsureDirs() {
-	os.MkdirAll(TodosDir, 0755)
+	os.MkdirAll(TodosDir, 0700)
 }

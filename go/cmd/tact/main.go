@@ -114,7 +114,7 @@ func main() {
 	listCmd := &cobra.Command{
 		Use: "list", Short: "List todos",
 		Run: func(cmd *cobra.Command, args []string) {
-			if project != defaultProject() || project != "" {
+			if project != "" {
 				slug := todo.Slug(project)
 				pt := todo.LoadProjectTodos(slug)
 				printTodos(pt.Project, pt.Items)
@@ -129,7 +129,7 @@ func main() {
 			}
 		},
 	}
-	listCmd.Flags().StringVarP(&project, "project", "p", defaultProject(), "Project name")
+	listCmd.Flags().StringVarP(&project, "project", "p", "", "Project name (omit to list all)")
 
 	todoCmd.AddCommand(addCmd, doneCmd, startCmd, rmCmd, listCmd)
 	root.AddCommand(todoCmd)
