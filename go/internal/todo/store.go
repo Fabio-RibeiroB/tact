@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/fabiobrady/tact/internal/model"
@@ -25,7 +24,8 @@ func todoPath(slug string) string {
 	return filepath.Join(model.TodosDir, slug+".json")
 }
 
-// LoadProjectTodos reads a project's todo file with a shared lock.
+// LoadProjectTodos reads a project's todo file.
+// No locking needed: SaveProjectTodos writes atomically via os.Rename.
 func LoadProjectTodos(slug string) model.ProjectTodos {
 	p := todoPath(slug)
 	f, err := os.Open(p)
@@ -33,8 +33,6 @@ func LoadProjectTodos(slug string) model.ProjectTodos {
 		return model.ProjectTodos{Project: slug}
 	}
 	defer f.Close()
-	syscall.Flock(int(f.Fd()), syscall.LOCK_SH)
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 
 	var todos model.ProjectTodos
 	if json.NewDecoder(f).Decode(&todos) != nil {
@@ -43,7 +41,8 @@ func LoadProjectTodos(slug string) model.ProjectTodos {
 	return todos
 }
 
-// SaveProjectTodos writes a project's todo file with an exclusive lock.
+// SaveProjectTodos writes a project's todo file atomically via a temp file
+// and os.Rename, so readers always see a complete file.
 func SaveProjectTodos(todos model.ProjectTodos) error {
 	model.EnsureDirs()
 	slug := Slug(todos.Project)
@@ -53,22 +52,26 @@ func SaveProjectTodos(todos model.ProjectTodos) error {
 	p := todoPath(slug)
 	todos.UpdatedAt = time.Now()
 
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
 	data, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
-	return err
+
+	tmp, err := os.CreateTemp(model.TodosDir, ".tact-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op on success (file renamed), cleans up on failure
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, p)
 }
 
 // AddTodo adds a new todo item to a project.
