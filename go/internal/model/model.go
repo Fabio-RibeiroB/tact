@@ -173,7 +173,7 @@ func (t *TodoStatus) UnmarshalJSON(data []byte) error {
 // NewTodoID generates a random 8-character hex ID.
 func NewTodoID() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	_, _ = rand.Read(b) // crypto/rand.Read never fails on Linux/macOS (reads /dev/urandom)
 	return hex.EncodeToString(b)
 }
 

@@ -62,36 +62,51 @@ func main() {
 
 	doneCmd := &cobra.Command{
 		Use: "done [id]", Short: "Mark todo as done", Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			if todo.UpdateTodo(todo.Slug(project), args[0], model.TodoDone) {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ok, err := todo.UpdateTodo(todo.Slug(project), args[0], model.TodoDone)
+			if err != nil {
+				return err
+			}
+			if ok {
 				fmt.Println("Marked as done")
 			} else {
 				fmt.Fprintln(os.Stderr, "Not found")
 			}
+			return nil
 		},
 	}
 	doneCmd.Flags().StringVarP(&project, "project", "p", defaultProject(), "Project name")
 
 	startCmd := &cobra.Command{
 		Use: "start [id]", Short: "Mark todo as in-progress", Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			if todo.UpdateTodo(todo.Slug(project), args[0], model.TodoInProgress) {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ok, err := todo.UpdateTodo(todo.Slug(project), args[0], model.TodoInProgress)
+			if err != nil {
+				return err
+			}
+			if ok {
 				fmt.Println("Started")
 			} else {
 				fmt.Fprintln(os.Stderr, "Not found")
 			}
+			return nil
 		},
 	}
 	startCmd.Flags().StringVarP(&project, "project", "p", defaultProject(), "Project name")
 
 	rmCmd := &cobra.Command{
 		Use: "rm [id]", Short: "Remove a todo", Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			if todo.RemoveTodo(todo.Slug(project), args[0]) {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ok, err := todo.RemoveTodo(todo.Slug(project), args[0])
+			if err != nil {
+				return err
+			}
+			if ok {
 				fmt.Println("Removed")
 			} else {
 				fmt.Fprintln(os.Stderr, "Not found")
 			}
+			return nil
 		},
 	}
 	rmCmd.Flags().StringVarP(&project, "project", "p", defaultProject(), "Project name")

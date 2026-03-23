@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/fabiobrady/tact/internal/model"
@@ -25,7 +24,8 @@ func todoPath(slug string) string {
 	return filepath.Join(model.TodosDir, slug+".json")
 }
 
-// LoadProjectTodos reads a project's todo file with a shared lock.
+// LoadProjectTodos reads a project's todo file.
+// No locking needed: SaveProjectTodos writes atomically via os.Rename.
 func LoadProjectTodos(slug string) model.ProjectTodos {
 	p := todoPath(slug)
 	f, err := os.Open(p)
@@ -33,8 +33,6 @@ func LoadProjectTodos(slug string) model.ProjectTodos {
 		return model.ProjectTodos{Project: slug}
 	}
 	defer f.Close()
-	syscall.Flock(int(f.Fd()), syscall.LOCK_SH)
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 
 	var todos model.ProjectTodos
 	if json.NewDecoder(f).Decode(&todos) != nil {
@@ -43,7 +41,8 @@ func LoadProjectTodos(slug string) model.ProjectTodos {
 	return todos
 }
 
-// SaveProjectTodos writes a project's todo file with an exclusive lock.
+// SaveProjectTodos writes a project's todo file atomically via a temp file
+// and os.Rename, so readers always see a complete file.
 func SaveProjectTodos(todos model.ProjectTodos) error {
 	model.EnsureDirs()
 	slug := Slug(todos.Project)
@@ -53,22 +52,26 @@ func SaveProjectTodos(todos model.ProjectTodos) error {
 	p := todoPath(slug)
 	todos.UpdatedAt = time.Now()
 
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
 	data, err := json.MarshalIndent(todos, "", "  ")
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
-	return err
+
+	tmp, err := os.CreateTemp(model.TodosDir, ".tact-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op on success (file renamed), cleans up on failure
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, p)
 }
 
 // AddTodo adds a new todo item to a project.
@@ -90,22 +93,21 @@ func AddTodo(project, text, sourceSession string, tags []string) (model.TodoItem
 	return item, SaveProjectTodos(todos)
 }
 
-// UpdateTodo changes a todo item's status.
-func UpdateTodo(slug, todoID string, status model.TodoStatus) bool {
+// UpdateTodo changes a todo item's status. Returns false if the ID was not found.
+func UpdateTodo(slug, todoID string, status model.TodoStatus) (bool, error) {
 	todos := LoadProjectTodos(slug)
 	for i := range todos.Items {
 		if todos.Items[i].ID == todoID {
 			todos.Items[i].Status = status
 			todos.Items[i].UpdatedAt = time.Now()
-			SaveProjectTodos(todos)
-			return true
+			return true, SaveProjectTodos(todos)
 		}
 	}
-	return false
+	return false, nil
 }
 
-// RemoveTodo deletes a todo item.
-func RemoveTodo(slug, todoID string) bool {
+// RemoveTodo deletes a todo item. Returns false if the ID was not found.
+func RemoveTodo(slug, todoID string) (bool, error) {
 	todos := LoadProjectTodos(slug)
 	n := len(todos.Items)
 	filtered := make([]model.TodoItem, 0, n)
@@ -115,11 +117,10 @@ func RemoveTodo(slug, todoID string) bool {
 		}
 	}
 	if len(filtered) == n {
-		return false
+		return false, nil
 	}
 	todos.Items = filtered
-	SaveProjectTodos(todos)
-	return true
+	return true, SaveProjectTodos(todos)
 }
 
 // ListAllTodos loads all project todo lists.
