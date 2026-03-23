@@ -14,8 +14,9 @@ var (
 	kiroWorkingRe     = regexp.MustCompile(`Thinking\.\.\.|Processing\.\.\.|Generating\.\.\.|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏`)
 	kiroIdleRe        = regexp.MustCompile(`\d+%\s*λ\s*>\s*$|^λ\s*>\s*$|^>\s*$`)
 	kiroPromptRe      = regexp.MustCompile(`(\d+)%\s*λ`)
-	codexWorkingRe    = regexp.MustCompile(`(?i)(thinking\.{3}|processing\.{3}|generating\.{3}|running\s+(bash|command|tool)|tool call|spawning|executing\s+\w+)`)
-	codexIdleRe       = regexp.MustCompile(`^[›>] ?$|esc to interrupt|shift\+tab`)
+	codexWorkingRe    = regexp.MustCompile(`(?i)(thinking\.{3}|processing\.{3}|generating\.{3}|running\s+(bash|command|tool)|tool call|spawning|executing\s+\w+|working\s*\()`)
+	codexIdleRe       = regexp.MustCompile(`^[›>] ?$`)
+	codexPromptRe     = regexp.MustCompile(`^[›>]\s+\S`)
 	opencodeWorkingRe = regexp.MustCompile(`(?i)^\s*(thinking|processing|generating)\s*[.⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+|^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]`)
 	opencodeIdleRe    = regexp.MustCompile(`^[>›]\s*$|^[>›]\s+\S|^>\s*$`)
 	opencodePromptRe  = regexp.MustCompile(`^[>›]\s*`)
@@ -109,6 +110,11 @@ func DetectStatus(paneContent, paneTitle string, procType model.ProcessType) mod
 		return model.StatusIdle
 
 	case model.ProcessCodex:
+		// Codex keeps the submitted prompt visible while it is working, so explicit
+		// activity markers need to win over the trailing prompt line.
+		if codexWorkingRe.MatchString(tail) {
+			return model.StatusWorking
+		}
 		end := len(lines)
 		start := end - 8
 		if start < 0 {
@@ -119,13 +125,10 @@ func DetectStatus(paneContent, paneTitle string, procType model.ProcessType) mod
 			if trimmed == "" {
 				continue
 			}
-			if codexIdleRe.MatchString(trimmed) {
+			if codexIdleRe.MatchString(trimmed) || codexPromptRe.MatchString(trimmed) {
 				return model.StatusIdle
 			}
 			break
-		}
-		if codexWorkingRe.MatchString(tail) {
-			return model.StatusWorking
 		}
 		return model.StatusIdle
 

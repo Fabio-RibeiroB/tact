@@ -2,6 +2,9 @@ package tui
 
 import (
 	"testing"
+	"time"
+
+	"github.com/fabiobrady/tact/internal/model"
 )
 
 func TestStripControlSequences(t *testing.T) {
@@ -100,6 +103,58 @@ func TestSanitizeField(t *testing.T) {
 			got := sanitizeField(tt.input)
 			if got != tt.want {
 				t.Errorf("sanitizeField(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestActivityTimestamp(t *testing.T) {
+	now := time.Date(2026, 3, 23, 20, 0, 0, 0, time.UTC)
+	earlier := now.Add(-2 * time.Minute)
+
+	tests := []struct {
+		name string
+		prev model.SessionInfo
+		next model.SessionInfo
+		want time.Time
+	}{
+		{
+			name: "first attention detection resets age",
+			prev: model.SessionInfo{Status: model.StatusWorking, LastChecked: earlier},
+			next: model.SessionInfo{Status: model.StatusNeedsAttention},
+			want: now,
+		},
+		{
+			name: "continued attention preserves waiting age",
+			prev: model.SessionInfo{Status: model.StatusNeedsAttention, LastChecked: earlier},
+			next: model.SessionInfo{Status: model.StatusNeedsAttention},
+			want: earlier,
+		},
+		{
+			name: "pane content change counts as activity",
+			prev: model.SessionInfo{Status: model.StatusWorking, LastChecked: earlier, PaneContent: "old"},
+			next: model.SessionInfo{Status: model.StatusWorking, PaneContent: "new"},
+			want: now,
+		},
+		{
+			name: "unchanged pane content preserves age",
+			prev: model.SessionInfo{Status: model.StatusIdle, LastChecked: earlier, PaneContent: "same"},
+			next: model.SessionInfo{Status: model.StatusIdle, PaneContent: "same"},
+			want: earlier,
+		},
+		{
+			name: "disconnect preserves prior age",
+			prev: model.SessionInfo{Status: model.StatusIdle, LastChecked: earlier},
+			next: model.SessionInfo{Status: model.StatusDisconnected},
+			want: earlier,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := activityTimestamp(tt.prev, tt.next, now)
+			if !got.Equal(tt.want) {
+				t.Fatalf("activityTimestamp() = %v, want %v", got, tt.want)
 			}
 		})
 	}

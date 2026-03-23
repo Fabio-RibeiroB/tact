@@ -75,37 +75,6 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		Width(width).
 		Render(left + strings.Repeat(" ", gap) + right)
 
-	// Summary line
-	var summaryParts []string
-	if working > 0 {
-		summaryParts = append(summaryParts,
-			lipgloss.NewStyle().Foreground(tokenFgInfo).Render(fmt.Sprintf("⟳ %d working", working)))
-	}
-	if selected != nil && selected.TaskSummary != "" {
-		activity := sanitizeField(selected.TaskSummary)
-		maxLen := width - 40
-		if maxLen < 30 {
-			maxLen = 30
-		}
-		if len(activity) > maxLen {
-			activity = activity[:maxLen] + "…"
-		}
-		label := selected.DisplayName() + ": "
-		summaryParts = append(summaryParts,
-			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(label)+
-				lipgloss.NewStyle().Foreground(tokenFgDefault).Italic(true).Render(activity))
-	}
-	summaryLine := ""
-	if len(summaryParts) > 0 {
-		summaryLine = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1f2335")).
-			Width(width).
-			Render("  " + strings.Join(summaryParts, "  │  "))
-	}
-
-	if summaryLine != "" {
-		return bar + "\n" + summaryLine
-	}
 	return bar
 }
 
@@ -191,8 +160,8 @@ var sortLabels = []string{"", "↑ status", "↑ age", "↑ name"}
 const typeColWidth = 8 // "Claude  " fits in 8 chars
 
 func renderSessionTableHeader(width, sortMode int) string {
-	// indicator(2) + ST(2) + TYPE(typeColWidth) + AGO(5) + space(1)
-	nameWidth := width - 2 - 2 - typeColWidth - 5 - 1
+	// indicator(2) + TYPE(typeColWidth) + NAME + STATUS(3)
+	nameWidth := width - 2 - typeColWidth - 3
 	if nameWidth < 8 {
 		nameWidth = 8
 	}
@@ -204,10 +173,9 @@ func renderSessionTableHeader(width, sortMode int) string {
 
 	dim := lipgloss.NewStyle().Foreground(tokenFgMuted)
 	row := dim.Width(2).Render("") +
-		dim.Width(2).Render("") +
 		dim.Width(typeColWidth).Render("AI") +
 		dim.Width(nameWidth).Render(nameLabel) +
-		" " + dim.Width(4).Render("AGO")
+		dim.Width(3).Render(" ST")
 
 	return row
 }
@@ -224,8 +192,8 @@ func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 	icon := statusIcon(s.Status, blinkOn, spinnerIdx)
 	tStr := typeTag(s.ProcessType)
 
-	// indicator(2) + ST(2) + TYPE(typeColWidth) + AGO(5) + space(1)
-	nameWidth := width - 2 - 2 - typeColWidth - 5 - 1
+	// indicator(2) + TYPE(typeColWidth) + NAME + STATUS(3)
+	nameWidth := width - 2 - typeColWidth - 3
 	if nameWidth < 8 {
 		nameWidth = 8
 	}
@@ -245,14 +213,11 @@ func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 		nameStyle = nameStyle.Foreground(tokenFgInfo)
 	}
 
-	ago := formatAge(s.LastChecked)
-	agoStr := lipgloss.NewStyle().Width(4).Foreground(tokenFgMuted).Render(ago)
-
-	stCol := lipgloss.NewStyle().Width(2).Render(icon)
+	statusCol := lipgloss.NewStyle().Width(3).Render(icon)
 	typeCol := lipgloss.NewStyle().Width(typeColWidth).Render(tStr)
 	nameCol := nameStyle.Render(name)
 
-	row := indicator + stCol + typeCol + nameCol + " " + agoStr
+	row := indicator + typeCol + nameCol + statusCol
 
 	if selected {
 		return lipgloss.NewStyle().
@@ -278,7 +243,7 @@ func typeTag(t model.ProcessType) string {
 	case model.ProcessCodex:
 		return lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render("Codex")
 	case model.ProcessOpencode:
-		return lipgloss.NewStyle().Foreground(colorOrange).Bold(true).Render("Open")
+		return lipgloss.NewStyle().Foreground(colorOrange).Bold(true).Render("OpenCode")
 	}
 	return lipgloss.NewStyle().Foreground(tokenFgMuted).Render("?")
 }

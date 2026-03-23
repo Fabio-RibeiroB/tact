@@ -103,9 +103,9 @@ type SessionInfo struct {
 	ContextTokens int
 	ContextMax    int
 	LastActivity  string
-	TaskSummary   string // what the session is working on (last user prompt)
-	LastChecked   time.Time
-	PaneContent   string // last captured pane output for preview
+	TaskSummary   string    // what the session is working on (last user prompt)
+	LastChecked   time.Time // semantic activity age used by the UI's AGO column
+	PaneContent   string    // last captured pane output for preview
 }
 
 func (s *SessionInfo) DisplayName() string {

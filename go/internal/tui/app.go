@@ -171,7 +171,6 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 			if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
 				s.TaskSummary = sanitizeField(task)
 			}
-			s.LastChecked = time.Now()
 		}
 		return paneUpdateMsg(sessions)
 	}
@@ -711,6 +710,33 @@ func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
 	}
 }
 
+func activityTimestamp(prev, next model.SessionInfo, now time.Time) time.Time {
+	if next.LastChecked.IsZero() {
+		next.LastChecked = now
+	}
+	if prev.LastChecked.IsZero() {
+		return next.LastChecked
+	}
+
+	switch next.Status {
+	case model.StatusNeedsAttention:
+		if prev.Status != model.StatusNeedsAttention {
+			return now
+		}
+		return prev.LastChecked
+	case model.StatusDisconnected:
+		return prev.LastChecked
+	}
+
+	if next.PaneContent != "" && next.PaneContent != prev.PaneContent {
+		return now
+	}
+	if next.Status != prev.Status {
+		return now
+	}
+	return prev.LastChecked
+}
+
 // mergeSessions handles discovery results: adds new sessions, updates existing
 // ones, keeps still-live panes as Disconnected, and drops stale sessions.
 func (a *App) mergeSessions(discovered []model.SessionInfo) {
@@ -766,6 +792,7 @@ func (a *App) updateSessions(updated []model.SessionInfo) {
 		}
 		prev := a.sessions[i]
 		mergeFields(&u, &prev)
+		u.LastChecked = activityTimestamp(prev, u, time.Now())
 		a.sessions[i] = u
 	}
 }
