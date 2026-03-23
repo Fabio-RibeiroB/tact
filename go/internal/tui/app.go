@@ -676,7 +676,7 @@ func (a *App) removeTodo(id string) {
 	if slug == "" {
 		return
 	}
-	todo.RemoveTodo(slug, id)
+	todo.RemoveTodo(slug, id) //nolint:errcheck // TUI refreshes immediately after; display is self-correcting
 	a.refreshTodos()
 }
 
