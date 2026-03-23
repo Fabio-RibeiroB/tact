@@ -415,7 +415,7 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.confirmCmd = "send_escape"
 		}
 	case "i":
-		if a.selectedSession() != nil {
+		if a.selectedIdx < len(filtered) {
 			a.insertMode = true
 		}
 	}
@@ -449,30 +449,32 @@ func (a *App) handleTodoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return *a, nil
 }
 
+
 func (a *App) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := a.selectedSession()
 	if s == nil {
 		a.insertMode = false
 		return *a, nil
 	}
+	paneID := s.PaneID
 	switch msg.Type {
 	case tea.KeyEscape:
 		a.insertMode = false
 	case tea.KeyEnter:
-		tmux.SendKeys(s.PaneID, "Enter")
+		tmux.SendKeyFast(paneID, "Enter")
 	case tea.KeyBackspace:
-		tmux.SendKeys(s.PaneID, "BSpace")
+		tmux.SendKeyFast(paneID, "BSpace")
 	case tea.KeyTab:
-		tmux.SendKeys(s.PaneID, "Tab")
+		tmux.SendKeyFast(paneID, "Tab")
 	case tea.KeySpace:
-		tmux.SendKeys(s.PaneID, "Space")
+		tmux.SendKeyFast(paneID, "Space")
 	case tea.KeyUp:
-		tmux.SendKeys(s.PaneID, "Up")
+		tmux.SendKeyFast(paneID, "Up")
 	case tea.KeyDown:
-		tmux.SendKeys(s.PaneID, "Down")
+		tmux.SendKeyFast(paneID, "Down")
 	default:
 		if r := msg.String(); len(r) == 1 {
-			tmux.SendKeys(s.PaneID, r)
+			tmux.SendKeyFast(paneID, r)
 		}
 	}
 	return *a, nil
