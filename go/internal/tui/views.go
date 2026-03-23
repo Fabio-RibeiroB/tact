@@ -13,6 +13,19 @@ import (
 var attentionRe = regexp.MustCompile(
 	`(?i)Do you want to proceed\?|Allow\s+(once|always)\?|Allow command\?|Allow execution\?|\(y/n\)|\(Y/n\)|Yes/No\?|Waiting for your`)
 
+// ── Too small ────────────────────────────────────────────────────────
+
+func renderTooSmall(w, h int) string {
+	msg := fmt.Sprintf(
+		"Terminal too small (%dx%d)\nMinimum size: %dx%d",
+		w, h, minWidth, minHeight,
+	)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#f7768e")).
+		Padding(1, 2).
+		Render(msg)
+}
+
 // ── Header ──────────────────────────────────────────────────────────
 
 func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, selected *model.SessionInfo) string {
@@ -319,8 +332,10 @@ func renderOutputTab(a App, width, height int) string {
 	maxLineWidth := panelWidth - 4
 	var colored []string
 	for _, pl := range preview {
-		if len(pl) > maxLineWidth {
-			pl = pl[:maxLineWidth]
+		pl = strings.ReplaceAll(pl, "\r", "")
+		pl = strings.ReplaceAll(pl, "\t", "    ")
+		if runes := []rune(pl); len(runes) > maxLineWidth {
+			pl = string(runes[:maxLineWidth])
 		}
 		colored = append(colored, colorPreviewLine(pl))
 	}
@@ -433,8 +448,10 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 
 		var colored []string
 		for _, pl := range preview {
-			if len(pl) > 76 {
-				pl = pl[:76]
+			pl = strings.ReplaceAll(pl, "\r", "")
+			pl = strings.ReplaceAll(pl, "\t", "    ")
+			if runes := []rune(pl); len(runes) > 76 {
+				pl = string(runes[:76])
 			}
 			colored = append(colored, colorPreviewLine(pl))
 		}
