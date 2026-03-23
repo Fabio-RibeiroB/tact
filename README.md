@@ -16,11 +16,10 @@ Just run `tact` in a window within tmux and it will detect other panes/windows r
 - Switch easily between AI coding sessions like Claude Code, Codex, Opencode and Kiro-cli in tmux
 - Accept/Reject your agent's work
 - Automatically detects session states (idle, working, needs attention, disconnected)
-- Monitor token usage and costs for Claude Code sessions
 - See context window utilization at a glance
 - Get alerts when sessions need attention
 - Create and manage project-level todos synced across sessions
-- Send inputs to sessions without switching panes
+- Preview pane output without switching panes
 
 ## Installation
 
@@ -58,7 +57,7 @@ tact
 | `Enter` | Switch to selected pane |
 | `r` | Refresh session discovery |
 | `n` | Toggle notifications |
-| `i` | Enter insert mode (send keys to session) |
+| `i` | Enter insert mode in Sessions tab |
 | `Esc` | Exit insert mode |
 | `q` / `Ctrl+C` | Quit |
 
@@ -66,7 +65,8 @@ tact
 
 | Key | Action |
 |-----|--------|
-| `y` | Confirm/continue (sends Enter) |
+| `y` | Confirm/continue |
+| `t` | Kiro trust/approve option |
 | `a` | Auto-approve tool use |
 | `!` | Cancel current operation (sends Escape) |
 

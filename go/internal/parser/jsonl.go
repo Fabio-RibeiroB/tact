@@ -13,7 +13,7 @@ import (
 
 var nonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 
-// ParseSessionJSONL reads a Claude Code session JSONL file for cost and activity data.
+// ParseSessionJSONL reads session JSONL data for activity and prompt summaries.
 func ParseSessionJSONL(sessionID, cwd string) model.SessionData {
 	if data := parseCodexSessionJSONL(sessionID, cwd); data.MessageCount > 0 || data.LastMessage != "" || data.FirstHumanMessage != "" {
 		return data
@@ -44,25 +44,13 @@ func parseClaudeSessionJSONL(sessionID, cwd string) model.SessionData {
 			continue
 		}
 		var entry struct {
-			Type    string `json:"type"`
-			Role    string `json:"role"`
+			Type    string          `json:"type"`
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 			Message *struct {
 				Role    string          `json:"role"`
 				Content json.RawMessage `json:"content"`
-				Usage   *struct {
-					InputTokens              int `json:"input_tokens"`
-					OutputTokens             int `json:"output_tokens"`
-					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-				} `json:"usage"`
 			} `json:"message"`
-			Usage *struct {
-				InputTokens              int `json:"input_tokens"`
-				OutputTokens             int `json:"output_tokens"`
-				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			} `json:"usage"`
 		}
 		if json.Unmarshal(line, &entry) != nil {
 			continue
@@ -70,7 +58,6 @@ func parseClaudeSessionJSONL(sessionID, cwd string) model.SessionData {
 		// Resolve role and content: top-level or nested under message
 		role := entry.Role
 		content := entry.Content
-		var usage = entry.Usage
 		if entry.Message != nil {
 			if role == "" {
 				role = entry.Message.Role
@@ -81,18 +68,9 @@ func parseClaudeSessionJSONL(sessionID, cwd string) model.SessionData {
 			if content == nil {
 				content = entry.Message.Content
 			}
-			if usage == nil {
-				usage = entry.Message.Usage
-			}
 		}
 		if role == "" {
 			role = entry.Type
-		}
-		if usage != nil {
-			data.Cost.InputTokens += usage.InputTokens
-			data.Cost.OutputTokens += usage.OutputTokens
-			data.Cost.CacheReadTokens += usage.CacheReadInputTokens
-			data.Cost.CacheCreationTokens += usage.CacheCreationInputTokens
 		}
 		if role == "assistant" {
 			data.MessageCount++
@@ -117,7 +95,6 @@ func parseClaudeSessionJSONL(sessionID, cwd string) model.SessionData {
 			}
 		}
 	}
-	data.Cost.Compute()
 	return data
 }
 

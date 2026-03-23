@@ -9,7 +9,7 @@ import (
 
 var (
 	attentionRe = regexp.MustCompile(
-		`Do you want to proceed\??|Would you like to make the following edits\??|Do you want to make this edit\??|This command requires approval|Allow (once|always)\??|Allow command\??|Allow execution\??|\(y/n\)|\(Y/n\)|Yes/No\??|Yes, proceed\s*\(y\)|Press enter to confirm|don't ask again for these files|retry without sandbox|Waiting for your|❯\s*\d+\.\s*(Yes|No|Allow|Deny)`)
+		`Do you want to proceed\??|Would you like to make the following edits\??|Do you want to make this edit\??|This command requires approval|Allow (once|always)\??|Allow command\??|Allow execution\??|\((?:[YyNnTt]/?){2,}\)|Yes/No\??|Yes, proceed\s*\(y\)|Press enter to confirm|don't ask again for these files|retry without sandbox|Waiting for your|❯\s*\d+\.\s*(Yes|No|Allow|Deny)|\bapprove\b|\btrust this\b`)
 	claudeWorkingRe   = regexp.MustCompile(`✽\s*Vibing|⏺|Running\s+\w+\s+tool`)
 	kiroWorkingRe     = regexp.MustCompile(`Thinking\.\.\.|Processing\.\.\.|Generating\.\.\.|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏`)
 	kiroIdleRe        = regexp.MustCompile(`\d+%\s*λ\s*>\s*$|^λ\s*>\s*$|^>\s*$`)

@@ -8,15 +8,14 @@ import (
 	"github.com/fabiobrady/tact/internal/model"
 )
 
-	var (
-	costRe            = regexp.MustCompile(`Cost:\s*\$([0-9.]+)`)
+var (
 	contextRe         = regexp.MustCompile(`Context:.*?(\d+)k/(\d+)k\s*\((\d+)%\)`)
 	branchRe          = regexp.MustCompile(`⎇\s*(\S+)`)
 	codexContextRe    = regexp.MustCompile(`(?i)\bcontext\b.*?(\d+)%`)
 	opencodeContextRe = regexp.MustCompile(`(?i)\bcontext\b.*?(\d+)%`)
 )
 
-// ParseClaudeStatusline extracts cost, context, branch, and project from pane content.
+// ParseClaudeStatusline extracts context, branch, and project from pane content.
 func ParseClaudeStatusline(paneContent string) model.ClaudeStatus {
 	var cs model.ClaudeStatus
 	// CRITICAL: normalize non-breaking spaces to regular spaces
@@ -24,9 +23,6 @@ func ParseClaudeStatusline(paneContent string) model.ClaudeStatus {
 	lines := strings.Split(normalized, "\n")
 
 	for _, line := range lines {
-		if m := costRe.FindStringSubmatch(line); m != nil {
-			cs.CostUSD, _ = strconv.ParseFloat(m[1], 64)
-		}
 		if m := contextRe.FindStringSubmatch(line); m != nil {
 			cs.ContextTokens, _ = strconv.Atoi(m[1])
 			cs.ContextTokens *= 1000
@@ -95,10 +91,10 @@ func ParseOpencodeContext(paneContent string) int {
 }
 
 var (
-	claudePromptRe      = regexp.MustCompile(`^❯\s+(.+)`)
-	claudeSuggestionRe  = regexp.MustCompile(`^❯\s+Try\s+"`)
-	kiroPromptLineRe    = regexp.MustCompile(`\d+%\s*λ\s*>\s*(.+)`)
-	codexPromptLineRe   = regexp.MustCompile(`^[›>] ?(.+)`)
+	claudePromptRe       = regexp.MustCompile(`^❯\s+(.+)`)
+	claudeSuggestionRe   = regexp.MustCompile(`^❯\s+Try\s+"`)
+	kiroPromptLineRe     = regexp.MustCompile(`\d+%\s*λ\s*>\s*(.+)`)
+	codexPromptLineRe    = regexp.MustCompile(`^[›>] ?(.+)`)
 	opencodePromptLineRe = regexp.MustCompile(`^[>›]\s*(.+)`)
 )
 

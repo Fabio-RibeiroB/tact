@@ -67,19 +67,41 @@ func ListPanes() ([]PaneInfo, error) {
 	return panes, nil
 }
 
+// PaneContainsPID reports whether targetPID is still in the process tree rooted at paneID.
+func PaneContainsPID(paneID string, targetPID int) bool {
+	panes, err := ListPanes()
+	if err != nil {
+		return false
+	}
+	for _, pane := range panes {
+		if pane.PaneID == paneID {
+			if targetPID <= 0 {
+				return true
+			}
+			return processTreeContainsPID(pane.PanePID, targetPID)
+		}
+	}
+	return false
+}
+
 // FindAIProcess walks the process tree from panePID via BFS (max depth 5).
 // Claude is checked first, then Codex, then Kiro, then Opencode.
 func FindAIProcess(panePID int) (model.ProcessType, int) {
+	allPIDs := collectProcessTreePIDs(panePID, 5)
+	return findAIProcessInTree(allPIDs)
+}
+
+func collectProcessTreePIDs(rootPID, maxDepth int) []int32 {
 	// Collect all PIDs in the tree
 	var allPIDs []int32
 	queue := []struct {
 		pid   int32
 		depth int
-	}{{int32(panePID), 0}}
+	}{{int32(rootPID), 0}}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		if cur.depth > 5 {
+		if cur.depth > maxDepth {
 			continue
 		}
 		allPIDs = append(allPIDs, cur.pid)
@@ -98,7 +120,19 @@ func FindAIProcess(panePID int) (model.ProcessType, int) {
 			}{c.Pid, cur.depth + 1})
 		}
 	}
+	return allPIDs
+}
 
+func processTreeContainsPID(rootPID, targetPID int) bool {
+	for _, pid := range collectProcessTreePIDs(rootPID, 5) {
+		if int(pid) == targetPID {
+			return true
+		}
+	}
+	return false
+}
+
+func findAIProcessInTree(allPIDs []int32) (model.ProcessType, int) {
 	// Check Claude first
 	for _, pid := range allPIDs {
 		if isClaudeProcess(pid) {
@@ -386,6 +420,7 @@ func DiscoverSessions() []model.SessionInfo {
 		return nil
 	}
 	var sessions []model.SessionInfo
+	seen := make(map[string]bool)
 	for _, pane := range panes {
 		procType, procPID := FindAIProcess(pane.PanePID)
 		if procType == model.ProcessUnknown && pane.PaneCmd == "ssh" {
@@ -431,6 +466,16 @@ func DiscoverSessions() []model.SessionInfo {
 		if s.Cwd != "" {
 			s.ProjectName = filepath.Base(s.Cwd)
 		}
+		key := s.PaneID
+		if s.ProcessPID > 0 {
+			key = fmt.Sprintf("%s:%d", s.ProcessType.String(), s.ProcessPID)
+		} else if s.SessionID != "" {
+			key = fmt.Sprintf("%s:%s", s.ProcessType.String(), s.SessionID)
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		sessions = append(sessions, s)
 	}
 	return sessions

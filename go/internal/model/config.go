@@ -15,9 +15,9 @@ var (
 )
 
 const (
-	PanePollInterval      = 1  // seconds
-	DiscoveryPollInterval = 10 // seconds
-	CostPollInterval      = 30 // seconds
+	PanePollInterval        = 1  // seconds
+	DiscoveryPollInterval   = 10 // seconds
+	SessionDataPollInterval = 30 // seconds
 )
 
 func homeDir() string {

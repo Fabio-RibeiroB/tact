@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="fabiobrady/tact"
+REPO="Fabio-RibeiroB/tact"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 BINARY="tact"
 
@@ -19,11 +19,58 @@ case "$OS" in
   *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
-# Get latest release tag
-echo "Fetching latest release..."
-TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+fetch_latest_tag() {
+  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4
+}
+
+fetch_newest_tag() {
+  curl -fsSL "https://api.github.com/repos/${REPO}/tags?per_page=1" | grep '"name"' | head -n1 | cut -d'"' -f4
+}
+
+install_binary() {
+  src="$1"
+  if [ -w "$INSTALL_DIR" ]; then
+    mv "$src" "$INSTALL_DIR/$BINARY"
+  else
+    echo "Installing to $INSTALL_DIR (requires sudo)..."
+    sudo mv "$src" "$INSTALL_DIR/$BINARY"
+  fi
+  chmod +x "$INSTALL_DIR/$BINARY"
+}
+
+build_from_source() {
+  TAG="$1"
+  TARBALL_URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+  echo "No release asset available for ${TAG}; building from source instead..."
+  command -v go >/dev/null 2>&1 || {
+    echo "Go is required for source installs. Install Go 1.22+ and retry."
+    exit 1
+  }
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  curl -fsSL "$TARBALL_URL" -o "$TMP/source.tar.gz"
+  tar -xzf "$TMP/source.tar.gz" -C "$TMP"
+  SRC_DIR="$TMP/tact-${TAG#v}/go"
+  if [ ! -d "$SRC_DIR" ]; then
+    SRC_DIR=$(find "$TMP" -maxdepth 3 -type f -name go.mod | sed 's|/go.mod$||' | head -n1)
+  fi
+  if [ ! -d "$SRC_DIR" ]; then
+    echo "Could not find Go source in downloaded archive."
+    exit 1
+  fi
+  (cd "$SRC_DIR" && go build -o "$TMP/$BINARY" ./cmd/tact)
+  install_binary "$TMP/$BINARY"
+  echo "Installed $BINARY $TAG to $INSTALL_DIR/$BINARY"
+  exit 0
+}
+
+echo "Fetching latest version..."
+TAG=$(fetch_latest_tag)
 if [ -z "$TAG" ]; then
-  echo "Could not determine latest release. Check https://github.com/${REPO}/releases"
+  TAG=$(fetch_newest_tag)
+fi
+if [ -z "$TAG" ]; then
+  echo "Could not determine latest tag. Check https://github.com/${REPO}/tags"
   exit 1
 fi
 echo "Latest version: $TAG"
@@ -33,17 +80,15 @@ URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}_${OS}_${ARCH}
 echo "Downloading ${URL}..."
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-curl -fsSL "$URL" -o "$TMP/archive.tar.gz"
-tar -xzf "$TMP/archive.tar.gz" -C "$TMP"
+if ! curl -fsSL "$URL" -o "$TMP/archive.tar.gz"; then
+  build_from_source "$TAG"
+fi
+if ! tar -xzf "$TMP/archive.tar.gz" -C "$TMP"; then
+  build_from_source "$TAG"
+fi
 
 # Install
-if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMP/$BINARY" "$INSTALL_DIR/$BINARY"
-else
-  echo "Installing to $INSTALL_DIR (requires sudo)..."
-  sudo mv "$TMP/$BINARY" "$INSTALL_DIR/$BINARY"
-fi
-chmod +x "$INSTALL_DIR/$BINARY"
+install_binary "$TMP/$BINARY"
 
 echo "Installed $BINARY $TAG to $INSTALL_DIR/$BINARY"
 echo "  Run 'tact' to start the TUI"

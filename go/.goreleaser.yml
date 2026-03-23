@@ -14,13 +14,13 @@ archives:
 
 release:
   github:
-    owner: fabiobrady
+    owner: Fabio-RibeiroB
     name: tact
 
 brews:
   - repository:
-      owner: fabiobrady
+      owner: Fabio-RibeiroB
       name: homebrew-tap
     name: tact
-    homepage: https://github.com/fabiobrady/tact
+    homepage: https://github.com/Fabio-RibeiroB/tact
     description: Control tower for AI coding sessions

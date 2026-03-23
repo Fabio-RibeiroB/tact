@@ -22,7 +22,7 @@ type animTickMsg time.Time // fast tick for spinner/blink (~150ms)
 type pollTickMsg time.Time // slow tick for pane polling (~2s)
 type discoveryMsg []model.SessionInfo
 type paneUpdateMsg []model.SessionInfo
-type costUpdateMsg []model.SessionInfo
+type sessionDataUpdateMsg []model.SessionInfo
 type todoStrikeMsg string // carries todo ID to remove after strike animation
 
 // Tabs
@@ -36,7 +36,6 @@ const (
 const (
 	sortDefault = iota // discovery order
 	sortStatus         // attention → working → idle → disconnected
-	sortCost           // highest cost first
 	sortAge            // most recently active first
 	sortName           // alphabetical
 )
@@ -142,9 +141,6 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 			s.Status = parser.DetectStatus(clean, title, s.ProcessType)
 			if s.ProcessType == model.ProcessClaude {
 				cs := parser.ParseClaudeStatusline(clean)
-				if cs.CostUSD > 0 {
-					s.CostUSD = cs.CostUSD
-				}
 				if cs.ContextPct > 0 {
 					s.ContextPct = cs.ContextPct
 					s.ContextTokens = cs.ContextTokens
@@ -181,15 +177,12 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 	}
 }
 
-func doCostUpdate(sessions []model.SessionInfo) tea.Cmd {
+func doSessionDataUpdate(sessions []model.SessionInfo) tea.Cmd {
 	return func() tea.Msg {
 		for i := range sessions {
 			s := &sessions[i]
 			if s.SessionID != "" && s.Cwd != "" {
 				data := parser.ParseSessionJSONL(s.SessionID, s.Cwd)
-				if data.Cost.TotalUSD > 0 && s.CostUSD == 0 {
-					s.CostUSD = data.Cost.TotalUSD
-				}
 				if data.LastMessage != "" {
 					s.LastActivity = sanitizeField(data.LastMessage)
 				}
@@ -202,7 +195,7 @@ func doCostUpdate(sessions []model.SessionInfo) tea.Cmd {
 				}
 			}
 		}
-		return costUpdateMsg(sessions)
+		return sessionDataUpdateMsg(sessions)
 	}
 }
 
@@ -213,10 +206,10 @@ func todoStrikeAfter(id string, delay time.Duration) tea.Cmd {
 }
 
 var (
-	pollCount    int
-	discoveryDue int
-	costDue      int
-	ansiRe       = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[?!>]?[0-9;]*[a-zA-Z~])`)
+	pollCount      int
+	discoveryDue   int
+	sessionDataDue int
+	ansiRe         = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[?!>]?[0-9;]*[a-zA-Z~])`)
 )
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -263,11 +256,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.discovering = true
 			cmds = append(cmds, doDiscovery)
 		}
-		costDue++
-		if costDue >= model.CostPollInterval/model.PanePollInterval {
-			costDue = 0
+		sessionDataDue++
+		if sessionDataDue >= model.SessionDataPollInterval/model.PanePollInterval {
+			sessionDataDue = 0
 			if len(a.sessions) > 0 {
-				cmds = append(cmds, doCostUpdate(copySessionSlice(a.sessions)))
+				cmds = append(cmds, doSessionDataUpdate(copySessionSlice(a.sessions)))
 			}
 		}
 		cmds = append(cmds, pollTick())
@@ -277,7 +270,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.discovering = false
 		a.mergeSessions([]model.SessionInfo(msg))
 		if len(a.sessions) > 0 {
-			return a, doCostUpdate(copySessionSlice(a.sessions))
+			return a, doSessionDataUpdate(copySessionSlice(a.sessions))
 		}
 		return a, nil
 
@@ -287,17 +280,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.refreshTodos()
 		return a, nil
 
-	case costUpdateMsg:
+	case sessionDataUpdateMsg:
 		a.updateSessions([]model.SessionInfo(msg))
-		for i := range a.sessions {
-			s := &a.sessions[i]
-			if s.CostUSD > 0 {
-				s.CostHistory = append(s.CostHistory, s.CostUSD)
-				if len(s.CostHistory) > model.MaxCostHistory {
-					s.CostHistory = s.CostHistory[len(s.CostHistory)-model.MaxCostHistory:]
-				}
-			}
-		}
 		a.refreshTodos()
 		return a, nil
 
@@ -355,15 +339,17 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return *a, nil
 	case "s":
 		if !a.filterActive {
-			a.sortMode = (a.sortMode + 1) % 5
+			a.sortMode = (a.sortMode + 1) % 4
 		}
 		return *a, nil
 	}
 
 	// Tab-specific keys
 	switch a.activeTab {
-	case tabSessions, tabOutput:
+	case tabSessions:
 		return a.handleSessionKey(msg)
+	case tabOutput:
+		return a.handleOutputKey(msg)
 	case tabTodos:
 		return a.handleTodoKey(msg)
 	}
@@ -403,7 +389,15 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "y":
 		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
-			tmux.SendKeys(s.PaneID, "Enter")
+			if s.ProcessType == model.ProcessKiro {
+				tmux.SendKeys(s.PaneID, "y")
+			} else {
+				tmux.SendKeys(s.PaneID, "Enter")
+			}
+		}
+	case "t":
+		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention && s.ProcessType == model.ProcessKiro {
+			tmux.SendKeys(s.PaneID, "t")
 		}
 	case "a":
 		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
@@ -417,6 +411,41 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "i":
 		if a.selectedIdx < len(filtered) {
 			a.insertMode = true
+		}
+	}
+	return *a, nil
+}
+
+func (a *App) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	filtered := a.filteredSessions()
+	switch msg.String() {
+	case "j", "down":
+		if a.selectedIdx < len(filtered)-1 {
+			a.selectedIdx++
+			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
+		}
+	case "k", "up":
+		if a.selectedIdx > 0 {
+			a.selectedIdx--
+			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
+		}
+	case "g", "home":
+		a.selectedIdx = 0
+		a.refreshTodos()
+		if len(filtered) > 0 {
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[0]})
+		}
+	case "G", "end":
+		if len(filtered) > 0 {
+			a.selectedIdx = len(filtered) - 1
+			a.refreshTodos()
+			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
+		}
+	case "enter":
+		if a.selectedIdx < len(filtered) {
+			tmux.SwitchToPane(filtered[a.selectedIdx].PaneID)
 		}
 	}
 	return *a, nil
@@ -448,7 +477,6 @@ func (a *App) handleTodoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return *a, nil
 }
-
 
 func (a *App) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := a.selectedSession()
@@ -568,10 +596,6 @@ func (a *App) filteredSessions() []model.SessionInfo {
 		sort.SliceStable(sessions, func(i, j int) bool {
 			return statusPriority(sessions[i].Status) < statusPriority(sessions[j].Status)
 		})
-	case sortCost:
-		sort.SliceStable(sessions, func(i, j int) bool {
-			return sessions[i].CostUSD > sessions[j].CostUSD
-		})
 	case sortAge:
 		sort.SliceStable(sessions, func(i, j int) bool {
 			return sessions[i].LastChecked.After(sessions[j].LastChecked)
@@ -663,9 +687,6 @@ func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
 	if u.Status == model.StatusUnknown && prev.Status != model.StatusUnknown {
 		u.Status = prev.Status
 	}
-	if u.CostUSD == 0 && prev.CostUSD > 0 {
-		u.CostUSD = prev.CostUSD
-	}
 	if u.ContextPct == 0 && prev.ContextPct > 0 {
 		u.ContextPct = prev.ContextPct
 		u.ContextTokens = prev.ContextTokens
@@ -688,13 +709,12 @@ func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
 	if u.PaneContent == "" && prev.PaneContent != "" {
 		u.PaneContent = prev.PaneContent
 	}
-	u.CostHistory = prev.CostHistory
 }
 
 // mergeSessions handles discovery results: adds new sessions, updates existing
-// ones, and marks sessions missing from discovery as Disconnected (never drops them).
+// ones, keeps still-live panes as Disconnected, and drops stale sessions.
 func (a *App) mergeSessions(discovered []model.SessionInfo) {
-	if len(discovered) == 0 {
+	if discovered == nil {
 		return
 	}
 	existing := make(map[string]*model.SessionInfo, len(a.sessions))
@@ -712,9 +732,12 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 		merged = append(merged, u)
 	}
 
-	// Keep sessions not found by discovery as Disconnected rather than dropping them.
+	// Keep sessions not found by discovery as Disconnected only while their process still exists.
 	for _, prev := range a.sessions {
 		if !inDiscovery[prev.PaneID] {
+			if !tmux.PaneContainsPID(prev.PaneID, prev.ProcessPID) {
+				continue
+			}
 			prev.Status = model.StatusDisconnected
 			merged = append(merged, prev)
 		}
@@ -726,7 +749,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 	}
 }
 
-// updateSessions handles pane/cost update results: only updates existing sessions,
+// updateSessions handles pane/session-data update results: only updates existing sessions,
 // never adds or removes entries (discovery is the sole authority for that).
 func (a *App) updateSessions(updated []model.SessionInfo) {
 	if len(updated) == 0 {
@@ -794,7 +817,7 @@ func (a App) View() string {
 	}
 
 	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession())
-	tabBar := renderTabBar(a.activeTab, a.width)
+	tabBar := renderTabBar(a.activeTab, a.width, a.insertMode)
 	headerLines := strings.Count(header, "\n") + 1
 
 	filtered := a.filteredSessions()

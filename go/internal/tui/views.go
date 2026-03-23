@@ -30,7 +30,6 @@ func renderTooSmall(w, h int) string {
 
 func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, selected *model.SessionInfo) string {
 	attn := 0
-	var totalCost float64
 	working := 0
 	for _, s := range sessions {
 		if s.Status == model.StatusNeedsAttention {
@@ -39,7 +38,6 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		if s.Status == model.StatusWorking {
 			working++
 		}
-		totalCost += s.CostUSD
 	}
 
 	title := lipgloss.NewStyle().
@@ -56,7 +54,6 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		attnPill = headerPill("", "✓ all clear", tokenFgSuccess)
 	}
 
-	costPill := headerPill("Today", fmt.Sprintf("$%.2f", totalCost), tokenFgWarning)
 	clockPill := headerPill("", time.Now().Format("15:04:05"), tokenFgMuted)
 
 	notifyStr := lipgloss.NewStyle().Foreground(tokenFgSuccess).Render("🔔")
@@ -65,7 +62,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center,
-		title, "  ", sessionPill, " ", attnPill, " ", costPill)
+		title, "  ", sessionPill, " ", attnPill)
 	right := lipgloss.JoinHorizontal(lipgloss.Center, notifyStr, " ", clockPill)
 
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 2
@@ -114,7 +111,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 
 // ── Tab bar ─────────────────────────────────────────────────────────
 
-func renderTabBar(activeTab, width int) string {
+func renderTabBar(activeTab, width int, insertMode bool) string {
 	tabs := []struct {
 		key   string
 		label string
@@ -129,14 +126,21 @@ func renderTabBar(activeTab, width int) string {
 	for _, t := range tabs {
 		keyStr := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("[" + t.key + "]")
 		if t.tab == activeTab {
-			label := lipgloss.NewStyle().
+			style := lipgloss.NewStyle().
 				Foreground(tokenFgAccent).
 				Bold(true).
-				Underline(true).
-				Render(t.label)
+				Underline(true)
+			if insertMode && t.tab == tabOutput {
+				style = style.Foreground(colorYellow)
+			}
+			label := style.Render(t.label)
 			parts = append(parts, keyStr+" "+label)
 		} else {
-			label := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(t.label)
+			style := lipgloss.NewStyle().Foreground(tokenFgMuted)
+			if insertMode && t.tab == tabOutput {
+				style = style.Foreground(colorYellow).Bold(true)
+			}
+			label := style.Render(t.label)
 			parts = append(parts, keyStr+" "+label)
 		}
 	}
@@ -182,7 +186,7 @@ func renderFilterBar(active bool, text string, total, shown int, width int) stri
 
 // ── Session table (k9s-style, 1 row per session) ─────────────────────
 
-var sortLabels = []string{"", "↑ status", "↑ cost", "↑ age", "↑ name"}
+var sortLabels = []string{"", "↑ status", "↑ age", "↑ name"}
 
 const typeColWidth = 8 // "Claude  " fits in 8 chars
 
@@ -340,7 +344,7 @@ func renderOutputTab(a App, width, height int) string {
 		colored = append(colored, colorPreviewLine(pl))
 	}
 
-	help := helpStyle.Render("j/k:navigate  ⏎:switch  y:yes  a:auto  !:esc  i:insert  ?:help")
+	help := helpStyle.Render("j/k:navigate  ⏎:switch  ?:help")
 	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
 	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
@@ -393,16 +397,6 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			strings.Repeat(" ", 10)+
 				lipgloss.NewStyle().Foreground(tokenFgMuted).
 					Render(fmt.Sprintf("%d / %d tokens", s.ContextTokens, s.ContextMax)))
-	}
-
-	if s.CostUSD > 0 {
-		costStr := lipgloss.NewStyle().Foreground(tokenFgWarning).Bold(true).
-			Render(fmt.Sprintf("$%.2f", s.CostUSD))
-		spark := sparkline(s.CostHistory)
-		if spark != "" {
-			costStr += "  " + spark
-		}
-		lines = append(lines, labelStyle.Render("Cost:")+" "+costStr)
 	}
 
 	if s.LastActivity != "" {
@@ -523,7 +517,8 @@ func renderHelpOverlay(width, height int) string {
 		kv("j / k", "navigate"),
 		kv("g / G", "top / bottom"),
 		kv("Enter", "switch to pane"),
-		kv("y", "send Enter (yes)"),
+		kv("y", "confirm/continue"),
+		kv("t", "send 't' to Kiro"),
 		kv("a", "send 'a' (auto)"),
 		kv("!", "send Escape *"),
 		kv("i", "insert mode"),

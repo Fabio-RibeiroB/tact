@@ -99,8 +99,6 @@ type SessionInfo struct {
 	ProjectName   string
 	GitBranch     string
 	Status        SessionStatus
-	CostUSD       float64
-	CostHistory   []float64 // rolling cost snapshots for sparkline
 	ContextPct    int
 	ContextTokens int
 	ContextMax    int
@@ -109,8 +107,6 @@ type SessionInfo struct {
 	LastChecked   time.Time
 	PaneContent   string // last captured pane output for preview
 }
-
-const MaxCostHistory = 12
 
 func (s *SessionInfo) DisplayName() string {
 	if s.ProjectName != "" {
@@ -203,7 +199,6 @@ type ProjectTodos struct {
 
 // ClaudeStatus holds parsed statusline data from a Claude Code pane.
 type ClaudeStatus struct {
-	CostUSD       float64
 	ContextPct    int
 	ContextTokens int
 	ContextMax    int
@@ -211,27 +206,8 @@ type ClaudeStatus struct {
 	ProjectName   string
 }
 
-// SessionCost accumulates token usage for cost calculation.
-type SessionCost struct {
-	InputTokens         int
-	OutputTokens        int
-	CacheReadTokens     int
-	CacheCreationTokens int
-	TotalUSD            float64
-}
-
-// Compute calculates the total cost in USD based on Claude Opus 4.6 pricing.
-func (c *SessionCost) Compute() float64 {
-	c.TotalUSD = float64(c.InputTokens)*15.0/1_000_000 +
-		float64(c.OutputTokens)*75.0/1_000_000 +
-		float64(c.CacheReadTokens)*1.50/1_000_000 +
-		float64(c.CacheCreationTokens)*3.75/1_000_000
-	return c.TotalUSD
-}
-
 // SessionData holds enriched data parsed from a session's JSONL file.
 type SessionData struct {
-	Cost              SessionCost
 	LastMessage       string
 	FirstHumanMessage string
 	LastHumanMessage  string

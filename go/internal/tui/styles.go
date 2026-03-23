@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -161,32 +160,6 @@ func renderContextBar(pct, width int) string {
 	b.WriteString(lipgloss.NewStyle().Foreground(pctColor).Bold(true).
 		Render(fmt.Sprintf("%d%%", pct)))
 	return b.String()
-}
-
-// ── Sparkline ───────────────────────────────────────────────────────
-
-var sparkChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
-
-func sparkline(values []float64) string {
-	if len(values) < 2 {
-		return ""
-	}
-	mx := 0.0
-	for _, v := range values {
-		mx = math.Max(mx, v)
-	}
-	if mx == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, v := range values {
-		idx := int(v / mx * float64(len(sparkChars)-1))
-		if idx >= len(sparkChars) {
-			idx = len(sparkChars) - 1
-		}
-		b.WriteRune(sparkChars[idx])
-	}
-	return lipgloss.NewStyle().Foreground(colorYellow).Render(b.String())
 }
 
 // ── Header pill ─────────────────────────────────────────────────────
