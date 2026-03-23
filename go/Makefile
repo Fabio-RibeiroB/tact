@@ -1,6 +1,6 @@
 BINARY := tact
 
-.PHONY: build install clean release
+.PHONY: build install clean release check test vet
 
 build:
 	go build -o $(BINARY) ./cmd/tact/
@@ -13,3 +13,11 @@ clean:
 
 release:
 	goreleaser release --clean
+
+check: vet test
+
+vet:
+	go vet ./...
+
+test:
+	go test ./...
