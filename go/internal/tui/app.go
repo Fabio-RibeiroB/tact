@@ -76,12 +76,15 @@ type App struct {
 	showHelp   bool
 	confirmMsg string // non-empty = confirm modal visible
 	confirmCmd string // action to execute on confirm
+	renameMode bool
+	renameInput string
 
 	// Environment
 	sshSafe bool
 
 	themeName string
 	styleName string
+	sessionNames model.SessionNames
 }
 
 func newApp() App {
@@ -95,6 +98,7 @@ func newApp() App {
 		blinkOn:       true,
 		themeName:     themeName,
 		styleName:     styleName,
+		sessionNames:  model.LoadSessionNames(),
 	}
 	if isSSH() {
 		a.sshSafe = true
@@ -137,6 +141,7 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 	return func() tea.Msg {
 		for i := range sessions {
 			s := &sessions[i]
+			s.LastPolled = time.Now()
 			content := tmux.CapturePane(s.PaneID)
 			title := tmux.GetPaneTitle(s.PaneID)
 			if content == "" {
@@ -225,6 +230,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Priority: confirm modal > help overlay > filter > todo insert > insert > normal
 		if a.confirmMsg != "" {
 			return a.handleConfirmKey(msg)
+		}
+		if a.renameMode {
+			return a.handleRenameKey(msg)
 		}
 		if a.showHelp {
 			a.showHelp = false
@@ -421,6 +429,14 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.selectedIdx < len(filtered) {
 			a.insertMode = true
 		}
+	case "R":
+		if s := a.selectedSession(); s != nil {
+			a.renameMode = true
+			a.renameInput = s.CustomName
+			if a.renameInput == "" {
+				a.renameInput = s.BaseName()
+			}
+		}
 	}
 	return *a, nil
 }
@@ -447,6 +463,14 @@ func (a *App) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a.selectedIdx < len(filtered) {
 			tmux.SwitchToPane(filtered[a.selectedIdx].PaneID)
+		}
+	case "R":
+		if s := a.selectedSession(); s != nil {
+			a.renameMode = true
+			a.renameInput = s.CustomName
+			if a.renameInput == "" {
+				a.renameInput = s.BaseName()
+			}
 		}
 	}
 	return *a, nil
@@ -528,6 +552,39 @@ func (a *App) handleTodoInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if r := msg.String(); len(r) >= 1 {
 			a.todoInput += r
+		}
+	}
+	return *a, nil
+}
+
+func (a *App) handleRenameKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		a.renameMode = false
+		a.renameInput = ""
+	case tea.KeyEnter:
+		if s := a.selectedSession(); s != nil {
+			key := s.RenameKey()
+			trimmed := strings.TrimSpace(a.renameInput)
+			base := strings.TrimSpace(s.BaseName())
+			if trimmed == "" || trimmed == base {
+				delete(a.sessionNames, key)
+				s.CustomName = ""
+			} else {
+				a.sessionNames[key] = trimmed
+				s.CustomName = trimmed
+			}
+			_ = model.SaveSessionNames(a.sessionNames)
+		}
+		a.renameMode = false
+		a.renameInput = ""
+	case tea.KeyBackspace:
+		if len(a.renameInput) > 0 {
+			a.renameInput = a.renameInput[:len(a.renameInput)-1]
+		}
+	default:
+		if r := msg.String(); len(r) == 1 {
+			a.renameInput += r
 		}
 	}
 	return *a, nil
@@ -652,7 +709,7 @@ func (a *App) currentProjectSlug() string {
 	}
 	name := s.ProjectName
 	if name == "" {
-		name = s.DisplayName()
+		name = s.BaseName()
 	}
 	return todo.Slug(name)
 }
@@ -685,7 +742,7 @@ func (a *App) addTodo(text string) {
 	}
 	name := s.ProjectName
 	if name == "" {
-		name = s.DisplayName()
+		name = s.BaseName()
 	}
 	todo.AddTodo(name, text, "", nil)
 	a.refreshTodos()
@@ -727,8 +784,26 @@ func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
 	if u.ProjectName == "" && prev.ProjectName != "" {
 		u.ProjectName = prev.ProjectName
 	}
+	if u.CustomName == "" && prev.CustomName != "" {
+		u.CustomName = prev.CustomName
+	}
+	if !prev.LastChecked.IsZero() {
+		u.LastChecked = prev.LastChecked
+	}
+	if !prev.LastPolled.IsZero() {
+		u.LastPolled = prev.LastPolled
+	}
 	if u.PaneContent == "" && prev.PaneContent != "" {
 		u.PaneContent = prev.PaneContent
+	}
+}
+
+func (a *App) applySessionName(s *model.SessionInfo) {
+	if s == nil {
+		return
+	}
+	if name, ok := a.sessionNames[s.RenameKey()]; ok {
+		s.CustomName = name
 	}
 }
 
@@ -777,6 +852,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 		if prev, ok := existing[u.PaneID]; ok {
 			mergeFields(&u, prev)
 		}
+		a.applySessionName(&u)
 		merged = append(merged, u)
 	}
 
@@ -786,6 +862,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 			if !tmux.PaneContainsPID(prev.PaneID, prev.ProcessPID) {
 				continue
 			}
+			a.applySessionName(&prev)
 			prev.Status = model.StatusDisconnected
 			merged = append(merged, prev)
 		}
@@ -814,6 +891,7 @@ func (a *App) updateSessions(updated []model.SessionInfo) {
 		}
 		prev := a.sessions[i]
 		mergeFields(&u, &prev)
+		a.applySessionName(&u)
 		u.LastChecked = activityTimestamp(prev, u, time.Now())
 		a.sessions[i] = u
 	}
@@ -901,6 +979,13 @@ func (a App) View() string {
 	}
 	if a.confirmMsg != "" {
 		return appStyle.Width(a.width).Height(a.height).Render(renderConfirmModal(a.confirmMsg, a.width, a.height))
+	}
+	if a.renameMode {
+		baseName := ""
+		if s := a.selectedSession(); s != nil {
+			baseName = s.BaseName()
+		}
+		return appStyle.Width(a.width).Height(a.height).Render(renderRenameModal(a.renameInput, baseName, a.width, a.height))
 	}
 	return appStyle.Width(a.width).Height(a.height).Render(view)
 }

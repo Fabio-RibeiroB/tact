@@ -58,6 +58,7 @@ tact
 | `Tab` | Switch focus panel |
 | `Enter` | Switch to selected pane |
 | `r` | Refresh session discovery |
+| `R` | Rename selected session |
 | `n` | Toggle notifications |
 | `T` | Cycle theme |
 | `S` | Cycle style |

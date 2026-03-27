@@ -313,7 +313,7 @@ func renderSessionCardRow(s model.SessionInfo, selected, blinkOn bool, spinnerId
 		name = string([]rune(name)[:titleWidth-1]) + "…"
 	}
 
-	meta := typeTag(s.ProcessType) + "  " + lipgloss.NewStyle().Foreground(tokenFgMuted).Render(formatAge(s.LastChecked))
+	meta := typeTag(s.ProcessType) + "  " + lipgloss.NewStyle().Foreground(tokenFgMuted).Render(formatLastCheck(s.LastPolled))
 	if s.GitBranch != "" {
 		branch := sanitizeField(s.GitBranch)
 		if len([]rune(branch)) > max(6, width-12) {
@@ -409,13 +409,22 @@ func formatAge(t time.Time) string {
 	}
 	d := time.Since(t)
 	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
+		minutes := int(d.Minutes())
+		if minutes < 1 {
+			return "just now"
+		}
+		return fmt.Sprintf("%dm", minutes)
 	default:
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
+}
+
+func formatLastCheck(t time.Time) string {
+	if t.IsZero() {
+		return "checked --:--"
+	}
+	return "checked " + t.Format("15:04")
 }
 
 // ── Output tab ──────────────────────────────────────────────────────
@@ -464,7 +473,7 @@ func renderOutputTab(a App, width, height int) string {
 		colored = append(colored, colorPreviewLine(pl))
 	}
 
-	help := helpStyle.Render("j/k:navigate  T:theme  S:style  ⏎:switch  ?:help")
+	help := helpStyle.Render("j/k:navigate  R:rename  T:theme  S:style  ⏎:switch  ?:help")
 	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
 	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
@@ -502,6 +511,10 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 	lines = append(lines,
 		labelStyle.Render("Type:")+" "+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(typeName),
 	)
+	if s.CustomName != "" {
+		lines = append(lines,
+			labelStyle.Render("Name:")+" "+lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render(s.CustomName))
+	}
 	if s.Cwd != "" {
 		lines = append(lines, labelStyle.Render("Dir:")+" "+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(s.Cwd))
 	}
@@ -599,7 +612,7 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 			lipgloss.NewStyle().Bold(true).Foreground(colorYellow).
 				Render(detailHeading("Insert") + "  type to send to pane  Esc: exit"))
 	} else {
-		parts := []string{"i:insert", "T:theme", "S:style", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
+		parts := []string{"R:rename", "i:insert", "T:theme", "S:style", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
 		lines = append(lines, "", helpStyle.Render(strings.Join(parts, "  ")))
 	}
 
@@ -639,6 +652,7 @@ func renderHelpOverlay(width, height int) string {
 		kv("Tab", "next tab"),
 		kv("?", "toggle help"),
 		kv("r", "refresh sessions"),
+		kv("R", "rename session"),
 		kv("n", "toggle notify"),
 		kv("T", "cycle theme"),
 		kv("S", "cycle style"),
@@ -731,6 +745,27 @@ func renderConfirmModal(msg string, width, height int) string {
 			Padding(0, 2)
 	}
 	content := style.Render(line1 + "\n\n" + line2)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func renderRenameModal(input, baseName string, width, height int) string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Rename Session")
+	current := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render("Default: " + baseName)
+	entry := lipgloss.NewStyle().
+		Border(currentStyle.confirmBorder).
+		BorderForeground(tokenBorderFocused).
+		Padding(0, 1).
+		Render(input + "█")
+	hint := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render("Enter: save   Esc: cancel   clear or match default to reset")
+
+	content := lipgloss.NewStyle().
+		Border(currentStyle.confirmBorder).
+		BorderForeground(tokenBorderFocused).
+		Padding(1, 2).
+		Render(title + "\n\n" + current + "\n\n" + entry + "\n\n" + hint)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }

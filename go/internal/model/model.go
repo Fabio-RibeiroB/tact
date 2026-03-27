@@ -97,6 +97,7 @@ type SessionInfo struct {
 	SessionID     string
 	Cwd           string
 	ProjectName   string
+	CustomName    string
 	GitBranch     string
 	Status        SessionStatus
 	ContextPct    int
@@ -105,10 +106,11 @@ type SessionInfo struct {
 	LastActivity  string
 	TaskSummary   string    // what the session is working on (last user prompt)
 	LastChecked   time.Time // semantic activity age used by the UI's AGO column
+	LastPolled    time.Time // last successful TUI pane poll for this session
 	PaneContent   string    // last captured pane output for preview
 }
 
-func (s *SessionInfo) DisplayName() string {
+func (s *SessionInfo) BaseName() string {
 	if s.ProjectName != "" {
 		return s.ProjectName
 	}
@@ -116,6 +118,23 @@ func (s *SessionInfo) DisplayName() string {
 		return filepath.Base(strings.TrimRight(s.Cwd, "/"))
 	}
 	return s.PaneID
+}
+
+func (s *SessionInfo) DisplayName() string {
+	if s.CustomName != "" {
+		return s.CustomName
+	}
+	return s.BaseName()
+}
+
+func (s *SessionInfo) RenameKey() string {
+	if s.SessionID != "" {
+		return fmt.Sprintf("%s:session:%s", s.ProcessType.String(), s.SessionID)
+	}
+	if s.Cwd != "" {
+		return fmt.Sprintf("%s:cwd:%s:pane:%s", s.ProcessType.String(), s.Cwd, s.PaneID)
+	}
+	return fmt.Sprintf("%s:pane:%s", s.ProcessType.String(), s.PaneID)
 }
 
 // TodoStatus represents the state of a todo item.
