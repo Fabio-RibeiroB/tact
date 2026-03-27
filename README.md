@@ -19,6 +19,7 @@ Just run `tact` in a window within tmux and it will detect other panes/windows r
 - See context window utilization at a glance
 - Get alerts when sessions need attention
 - Create and manage project-level todos synced across sessions
+- Rename sessions in the TUI without affecting their project todo grouping
 - Preview pane output without switching panes
 - Wrap session navigation cyclically when moving past the first or last item
 - Switch between three built-in TUI themes and three distinct layout styles, and keep your choices across launches
@@ -115,9 +116,10 @@ tact/
 
 ### Data Storage
 
-Session data and todos are stored in `~/.local/share/tact/`:
-- `sessions/<session-id>.jsonl` — Parsed session data
-- `todos/<project-slug>.json` — Project-specific todo lists
+Tact stores its state under `~/.tact/`:
+- `config.json` — persisted theme and style choice
+- `data/session-names.json` — custom session rename overrides
+- `data/todos/<project-slug>.json` — project-specific todo lists
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
