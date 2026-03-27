@@ -9,6 +9,7 @@ import (
 )
 
 const defaultThemeName = "tokyo-night"
+const defaultStyleName = "card-stack"
 
 type themeDefinition struct {
 	Name string
@@ -32,6 +33,24 @@ type themeDefinition struct {
 	tabBarBg        lipgloss.Color
 	tooSmall        lipgloss.Color
 	contextGradient []string
+}
+
+type styleDefinition struct {
+	Name string
+
+	displayName  string
+	title        string
+	panelBorder  lipgloss.Border
+	activeBorder lipgloss.Border
+	previewBorder lipgloss.Border
+	helpBorder    lipgloss.Border
+	confirmBorder lipgloss.Border
+	dividerRune   string
+	tabOpen       string
+	tabClose      string
+	rowPrefix     string
+	selectedPrefix string
+	cardPadding    int
 }
 
 var themes = []themeDefinition{
@@ -103,8 +122,75 @@ var themes = []themeDefinition{
 	},
 }
 
+var styles = []styleDefinition{
+	{
+		Name:          "card-stack",
+		displayName:   "Card Stack",
+		title:         "TACT",
+		panelBorder:   lipgloss.RoundedBorder(),
+		activeBorder:  lipgloss.RoundedBorder(),
+		previewBorder: lipgloss.RoundedBorder(),
+		helpBorder:    lipgloss.RoundedBorder(),
+		confirmBorder: lipgloss.RoundedBorder(),
+		dividerRune:   "─",
+		tabOpen:       "‹",
+		tabClose:      "›",
+		rowPrefix:     "  ",
+		selectedPrefix:"▶ ",
+		cardPadding:   1,
+	},
+	{
+		Name:          "retro-bracket",
+		displayName:   "Retro Bracket",
+		title:         "[ TACT ]",
+		panelBorder: lipgloss.Border{
+			Top: "-", Bottom: "-", Left: "|", Right: "|",
+			TopLeft: "[", TopRight: "]", BottomLeft: "[", BottomRight: "]",
+		},
+		activeBorder: lipgloss.Border{
+			Top: "=", Bottom: "=", Left: "|", Right: "|",
+			TopLeft: "[", TopRight: "]", BottomLeft: "[", BottomRight: "]",
+		},
+		previewBorder: lipgloss.Border{
+			Top: "-", Bottom: "-", Left: "|", Right: "|",
+			TopLeft: "[", TopRight: "]", BottomLeft: "[", BottomRight: "]",
+		},
+		helpBorder: lipgloss.Border{
+			Top: "=", Bottom: "=", Left: "|", Right: "|",
+			TopLeft: "[", TopRight: "]", BottomLeft: "[", BottomRight: "]",
+		},
+		confirmBorder: lipgloss.Border{
+			Top: "=", Bottom: "=", Left: "|", Right: "|",
+			TopLeft: "[", TopRight: "]", BottomLeft: "[", BottomRight: "]",
+		},
+		dividerRune:   "=",
+		tabOpen:       "[",
+		tabClose:      "]",
+		rowPrefix:     "  ",
+		selectedPrefix:"> ",
+		cardPadding:   0,
+	},
+	{
+		Name:          "signal-grid",
+		displayName:   "Signal Grid",
+		title:         "TACT//GRID",
+		panelBorder:   lipgloss.NormalBorder(),
+		activeBorder:  lipgloss.ThickBorder(),
+		previewBorder: lipgloss.NormalBorder(),
+		helpBorder:    lipgloss.ThickBorder(),
+		confirmBorder: lipgloss.ThickBorder(),
+		dividerRune:   "━",
+		tabOpen:       "⟦",
+		tabClose:      "⟧",
+		rowPrefix:     "│ ",
+		selectedPrefix:"┃ ",
+		cardPadding:   0,
+	},
+}
+
 var (
 	currentTheme themeDefinition
+	currentStyle styleDefinition
 
 	colorBg       lipgloss.Color
 	colorSurface  lipgloss.Color
@@ -150,6 +236,7 @@ var (
 
 func init() {
 	applyTheme(themeByName(defaultThemeName))
+	applyStyle(styleByName(defaultStyleName))
 }
 
 func themeByName(name string) themeDefinition {
@@ -174,6 +261,39 @@ func themeDisplayName(name string) string {
 	default:
 		return "Tokyo Night"
 	}
+}
+
+func styleByName(name string) styleDefinition {
+	for _, style := range styles {
+		if style.Name == name {
+			return style
+		}
+	}
+	return styles[0]
+}
+
+func normalizeStyleName(name string) string {
+	return styleByName(name).Name
+}
+
+func styleDisplayName(name string) string {
+	return styleByName(name).displayName
+}
+
+func nextStyleName(name string) string {
+	name = normalizeStyleName(name)
+	for i, style := range styles {
+		if style.Name == name {
+			return styles[(i+1)%len(styles)].Name
+		}
+	}
+	return styles[0].Name
+}
+
+func applyStyleByName(name string) string {
+	style := styleByName(name)
+	applyStyle(style)
+	return style.Name
 }
 
 func nextThemeName(name string) string {
@@ -226,12 +346,12 @@ func applyTheme(theme themeDefinition) {
 	tokenBorderInactive = colorBorder
 
 	panelBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(currentStyle.panelBorder).
 		BorderForeground(colorBorder).
 		Background(colorSurface)
 
 	activePanelBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(currentStyle.activeBorder).
 		BorderForeground(colorBorderHi).
 		Background(colorSurface)
 
@@ -241,7 +361,7 @@ func applyTheme(theme themeDefinition) {
 		Bold(true).
 		Foreground(colorText)
 	previewBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(currentStyle.previewBorder).
 		BorderForeground(colorBorder).
 		Background(colorSurface)
 	dividerStyle = lipgloss.NewStyle().Foreground(colorBorder)
@@ -249,6 +369,11 @@ func applyTheme(theme themeDefinition) {
 	appStyle = lipgloss.NewStyle().
 		Foreground(colorText).
 		Background(colorBg)
+}
+
+func applyStyle(style styleDefinition) {
+	currentStyle = style
+	applyTheme(currentTheme)
 }
 
 var workingSpinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -348,12 +473,22 @@ func headerPill(label, value string, fg lipgloss.Color) string {
 	}
 	return lipgloss.NewStyle().
 		Background(colorSurface).
+		BorderStyle(currentStyle.panelBorder).
+		BorderForeground(colorBorder).
 		Padding(0, 1).
 		Render(content)
 }
 
 func divider(width int) string {
-	return dividerStyle.Render(strings.Repeat("─", width))
+	return dividerStyle.Render(strings.Repeat(currentStyle.dividerRune, width))
+}
+
+func appTitle() string {
+	return currentStyle.title
+}
+
+func styleTab(key string) string {
+	return currentStyle.tabOpen + key + currentStyle.tabClose
 }
 
 func todoIcon(s model.TodoStatus) string {

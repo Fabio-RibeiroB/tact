@@ -34,6 +34,7 @@ func EnsureDirs() {
 
 type UIConfig struct {
 	Theme string `json:"theme,omitempty"`
+	Style string `json:"style,omitempty"`
 }
 
 func LoadConfig() UIConfig {

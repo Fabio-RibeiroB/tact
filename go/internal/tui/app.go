@@ -81,17 +81,20 @@ type App struct {
 	sshSafe bool
 
 	themeName string
+	styleName string
 }
 
 func newApp() App {
 	cfg := model.LoadConfig()
 	themeName := applyThemeByName(cfg.Theme)
+	styleName := applyStyleByName(cfg.Style)
 	a := App{
 		activeTab:     tabSessions,
 		notifyEnabled: true,
 		prevStatuses:  make(map[string]model.SessionStatus),
 		blinkOn:       true,
 		themeName:     themeName,
+		styleName:     styleName,
 	}
 	if isSSH() {
 		a.sshSafe = true
@@ -337,7 +340,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "T":
 		a.themeName = nextThemeName(a.themeName)
 		a.themeName = applyThemeByName(a.themeName)
-		_ = model.SaveConfig(model.UIConfig{Theme: a.themeName})
+		_ = model.SaveConfig(model.UIConfig{Theme: a.themeName, Style: a.styleName})
+		return *a, nil
+	case "S":
+		a.styleName = nextStyleName(a.styleName)
+		a.styleName = applyStyleByName(a.styleName)
+		_ = model.SaveConfig(model.UIConfig{Theme: a.themeName, Style: a.styleName})
 		return *a, nil
 	case "?":
 		a.showHelp = !a.showHelp
@@ -857,7 +865,7 @@ func (a App) View() string {
 		return renderTooSmall(a.width, a.height)
 	}
 
-	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession(), a.themeName)
+	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession(), a.themeName, a.styleName)
 	tabBar := renderTabBar(a.activeTab, a.width, a.insertMode)
 	headerLines := strings.Count(header, "\n") + 1
 
@@ -910,9 +918,9 @@ func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) st
 
 	// Sessions table
 	var listLines []string
-	listLines = append(listLines, renderSessionTableHeader(leftWidth-2, a.sortMode))
+	listLines = append(listLines, renderSessionListHeader(leftWidth-2, a.sortMode))
 	for i, s := range filtered {
-		listLines = append(listLines, renderSessionTableRow(s, i == a.selectedIdx, a.blinkOn, a.spinnerIdx, leftWidth-2))
+		listLines = append(listLines, renderSessionListRow(s, i == a.selectedIdx, a.blinkOn, a.spinnerIdx, leftWidth-2))
 	}
 	if len(filtered) == 0 {
 		noSess := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  No sessions found")
@@ -921,7 +929,7 @@ func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) st
 		}
 		listLines = append(listLines, noSess)
 	}
-	listContent := strings.Join(listLines, "\n")
+	listContent := trimToLines(strings.Join(listLines, "\n"), max(1, sessionHeight-2))
 	sessionPanel := activePanelBorder.Width(leftWidth).Height(sessionHeight).Render(listContent)
 
 	// Todo section (read-only in sessions tab; press 2 to manage)

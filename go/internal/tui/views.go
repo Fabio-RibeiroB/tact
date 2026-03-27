@@ -29,25 +29,22 @@ func renderTooSmall(w, h int) string {
 
 // ── Header ──────────────────────────────────────────────────────────
 
-func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, _ *model.SessionInfo, themeName string) string {
+func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, _ *model.SessionInfo, themeName, styleName string) string {
 	attn := 0
-	working := 0
 	for _, s := range sessions {
 		if s.Status == model.StatusNeedsAttention {
 			attn++
-		}
-		if s.Status == model.StatusWorking {
-			working++
 		}
 	}
 
 	title := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(tokenFgAccent).
-		Render("⚡ TACT")
+		Render("⚡ " + appTitle())
 
 	sessionPill := headerPill("Sessions", fmt.Sprintf("%d", len(sessions)), tokenFgDefault)
 	themePill := headerPill("Theme", themeDisplayName(themeName), tokenFgAccent)
+	stylePill := headerPill("Style", styleDisplayName(styleName), tokenFgInfo)
 
 	var attnPill string
 	if attn > 0 {
@@ -64,7 +61,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, _
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center,
-		title, "  ", sessionPill, " ", themePill, " ", attnPill)
+		title, "  ", sessionPill, " ", themePill, " ", stylePill, " ", attnPill)
 	right := lipgloss.JoinHorizontal(lipgloss.Center, notifyStr, " ", clockPill)
 
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 2
@@ -95,7 +92,7 @@ func renderTabBar(activeTab, width int, insertMode bool) string {
 
 	var parts []string
 	for _, t := range tabs {
-		keyStr := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("[" + t.key + "]")
+		keyStr := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(styleTab(t.key))
 		if t.tab == activeTab {
 			style := lipgloss.NewStyle().
 				Foreground(tokenFgAccent).
@@ -161,6 +158,36 @@ var sortLabels = []string{"", "↑ status", "↑ age", "↑ name"}
 
 const typeColWidth = 8 // "Claude  " fits in 8 chars
 
+func renderSessionListHeader(width, sortMode int) string {
+	switch currentStyle.Name {
+	case "card-stack":
+		label := "Session Stack"
+		if sortMode > 0 && sortMode < len(sortLabels) {
+			label = "Session Stack · " + sortLabels[sortMode]
+		}
+		return lipgloss.NewStyle().
+			Background(tokenBgSurface).
+			Foreground(tokenFgMuted).
+			Bold(true).
+			Padding(0, currentStyle.cardPadding).
+			Width(width).
+			Render(label)
+	case "retro-bracket":
+		label := "[SESSIONS]"
+		if sortMode > 0 && sortMode < len(sortLabels) {
+			label += " [SORT " + strings.ToUpper(strings.TrimPrefix(sortLabels[sortMode], "↑ ")) + "]"
+		}
+		return lipgloss.NewStyle().
+			Background(tokenBgSurface).
+			Foreground(tokenFgMuted).
+			Bold(true).
+			Width(width).
+			Render(label)
+	default:
+		return renderSessionTableHeader(width, sortMode)
+	}
+}
+
 func renderSessionTableHeader(width, sortMode int) string {
 	// indicator(2) + TYPE(typeColWidth) + NAME + STATUS(3)
 	nameWidth := width - 2 - typeColWidth - 3
@@ -183,6 +210,17 @@ func renderSessionTableHeader(width, sortMode int) string {
 		Background(tokenBgSurface).
 		Width(width).
 		Render(row)
+}
+
+func renderSessionListRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
+	switch currentStyle.Name {
+	case "card-stack":
+		return renderSessionCardRow(s, selected, blinkOn, spinnerIdx, width)
+	case "retro-bracket":
+		return renderSessionRetroRow(s, selected, blinkOn, spinnerIdx, width)
+	default:
+		return renderSessionTableRow(s, selected, blinkOn, spinnerIdx, width)
+	}
 }
 
 func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
@@ -240,6 +278,92 @@ func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 		Background(tokenBgSurface).
 		Width(width).
 		Render(row)
+}
+
+func renderSessionCardRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
+	status := statusBadge(s.Status)
+	titleWidth := max(8, width-lipgloss.Width(status)-4)
+	name := sanitizeField(s.DisplayName())
+	if len([]rune(name)) > titleWidth {
+		name = string([]rune(name)[:titleWidth-1]) + "…"
+	}
+
+	meta := typeTag(s.ProcessType) + "  " + lipgloss.NewStyle().Foreground(tokenFgMuted).Render(formatAge(s.LastChecked))
+	if s.GitBranch != "" {
+		branch := sanitizeField(s.GitBranch)
+		if len([]rune(branch)) > max(6, width-12) {
+			branch = string([]rune(branch)[:max(5, width-13)]) + "…"
+		}
+		meta += "  " + lipgloss.NewStyle().Foreground(colorMagenta).Render("⎇ "+branch)
+	}
+
+	rowStyle := lipgloss.NewStyle().
+		Background(tokenBgSurface).
+		Border(currentStyle.panelBorder).
+		BorderForeground(tokenBorderInactive).
+		Padding(0, currentStyle.cardPadding).
+		Width(width)
+	if selected {
+		rowStyle = rowStyle.Background(tokenBgSelected).BorderForeground(tokenBorderFocused)
+	} else if s.Status == model.StatusNeedsAttention {
+		rowStyle = rowStyle.Background(tokenBgAttention).BorderForeground(tokenFgDanger)
+	}
+
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		lipgloss.NewStyle().Foreground(tokenFgAccent).Render(currentStyle.selectedPrefix),
+		lipgloss.NewStyle().Bold(true).Foreground(tokenFgDefault).Width(titleWidth).Render(name),
+		" ",
+		status,
+	)
+	if !selected {
+		title = lipgloss.JoinHorizontal(lipgloss.Center,
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(currentStyle.rowPrefix),
+			lipgloss.NewStyle().Bold(true).Foreground(tokenFgDefault).Width(titleWidth).Render(name),
+			" ",
+			status,
+		)
+	}
+
+	iconLine := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render(statusIcon(s.Status, blinkOn, spinnerIdx) + " " + meta)
+	if s.TaskSummary != "" {
+		task := sanitizeField(s.TaskSummary)
+		if len([]rune(task)) > max(8, width-4) {
+			task = string([]rune(task)[:max(7, width-5)]) + "…"
+		}
+		return rowStyle.Render(title + "\n" + iconLine + "\n" +
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(task))
+	}
+	return rowStyle.Render(title + "\n" + iconLine)
+}
+
+func renderSessionRetroRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
+	prefix := currentStyle.rowPrefix
+	if selected {
+		prefix = currentStyle.selectedPrefix
+	}
+	status := strings.ToUpper(s.Status.String())
+	if s.Status == model.StatusUnknown {
+		status = "POLL"
+	}
+	name := sanitizeField(s.DisplayName())
+	line := fmt.Sprintf("%s[%s] [%s] %s %s",
+		prefix,
+		strings.ToUpper(s.ProcessType.String()),
+		status,
+		statusIcon(s.Status, blinkOn, spinnerIdx),
+		name,
+	)
+	if len([]rune(line)) > width {
+		line = string([]rune(line)[:max(1, width-1)]) + "…"
+	}
+	style := lipgloss.NewStyle().Background(tokenBgSurface).Width(width)
+	if selected {
+		style = style.Background(tokenBgSelected).Foreground(tokenFgAccent).Bold(true)
+	} else if s.Status == model.StatusNeedsAttention {
+		style = style.Background(tokenBgAttention)
+	}
+	return style.Render(line)
 }
 
 func typeTag(t model.ProcessType) string {
@@ -317,7 +441,7 @@ func renderOutputTab(a App, width, height int) string {
 		colored = append(colored, colorPreviewLine(pl))
 	}
 
-	help := helpStyle.Render("j/k:navigate  T:theme  ⏎:switch  ?:help")
+	help := helpStyle.Render("j/k:navigate  T:theme  S:style  ⏎:switch  ?:help")
 	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
 	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
@@ -329,7 +453,7 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 		width = 20
 	}
 	if s == nil {
-		return panelHeadingStyle.Render("Overview") + "\n" +
+		return panelHeadingStyle.Render(detailHeading("Overview")) + "\n" +
 			lipgloss.NewStyle().Foreground(tokenFgMuted).
 				Render("\n  No session selected")
 	}
@@ -346,7 +470,7 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgDefault).
 		Render(s.DisplayName())
 	lines := []string{
-		panelHeadingStyle.Render("Overview"),
+		panelHeadingStyle.Render(detailHeading("Overview")),
 		"",
 		title + "  " + statusBadge(s.Status),
 		"",
@@ -438,7 +562,6 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 		}
 		box := boxStyle.Width(previewWidth).Height(previewHeight).
 			Render(strings.Join(colored, "\n"))
-
 		lines = append(lines, boxLabel, box)
 	}
 
@@ -446,9 +569,9 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 	if insertMode {
 		lines = append(lines, "",
 			lipgloss.NewStyle().Bold(true).Foreground(colorYellow).
-				Render("── INSERT ──  type to send to pane  Esc: exit"))
+				Render(detailHeading("Insert") + "  type to send to pane  Esc: exit"))
 	} else {
-		parts := []string{"i:insert", "T:theme", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
+		parts := []string{"i:insert", "T:theme", "S:style", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
 		lines = append(lines, "", helpStyle.Render(strings.Join(parts, "  ")))
 	}
 
@@ -490,6 +613,7 @@ func renderHelpOverlay(width, height int) string {
 		kv("r", "refresh sessions"),
 		kv("n", "toggle notify"),
 		kv("T", "cycle theme"),
+		kv("S", "cycle style"),
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Session Actions"),
 		kv("j / k", "navigate"),
@@ -542,14 +666,14 @@ func renderHelpOverlay(width, height int) string {
 	}
 
 	content := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(currentStyle.helpBorder).
 		BorderForeground(tokenBorderFocused).
 		Padding(1, 2).
 		Render(
 			lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("  Help  ") + "\n\n" +
 				strings.Join(rows, "\n") + "\n\n" +
 				lipgloss.NewStyle().Foreground(tokenFgMuted).
-					Render(fmt.Sprintf("Theme: %s   ? or Esc to close", themeDisplayName(currentTheme.Name))),
+					Render(fmt.Sprintf("Theme: %s   Style: %s   ? or Esc to close", themeDisplayName(currentTheme.Name), styleDisplayName(currentStyle.Name))),
 		)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
@@ -568,11 +692,11 @@ func renderConfirmModal(msg string, width, height int) string {
 	line2 := lipgloss.NewStyle().Foreground(tokenFgMuted).
 		Render("    [y] confirm   [Esc / n] cancel")
 
-	content := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+	style := lipgloss.NewStyle().
+		Border(currentStyle.confirmBorder).
 		BorderForeground(tokenFgDanger).
-		Padding(1, 3).
-		Render(line1 + "\n\n" + line2)
+		Padding(1, 3)
+	content := style.Render(line1 + "\n\n" + line2)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
@@ -641,4 +765,40 @@ func renderTodos(s *model.SessionInfo, shared *model.ProjectTodos, internal []mo
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func trimToLines(content string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) <= maxLines {
+		return content
+	}
+	return strings.Join(lines[:maxLines], "\n")
+}
+
+func detailHeading(label string) string {
+	switch currentStyle.Name {
+	case "retro-bracket":
+		return "[" + strings.ToUpper(label) + "]"
+	case "signal-grid":
+		return strings.ToUpper(label) + " //"
+	default:
+		return label
+	}
+}
+
+func truncateRunes(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
 }

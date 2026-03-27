@@ -193,12 +193,14 @@ func TestNewAppFallsBackToDefaultTheme(t *testing.T) {
 	oldDataDir := model.DataDir
 	oldTodosDir := model.TodosDir
 	oldTheme := currentTheme.Name
+	oldStyle := currentStyle.Name
 	t.Cleanup(func() {
 		model.TactHome = oldTactHome
 		model.ConfigPath = oldConfigPath
 		model.DataDir = oldDataDir
 		model.TodosDir = oldTodosDir
 		applyThemeByName(oldTheme)
+		applyStyleByName(oldStyle)
 	})
 
 	model.TactHome = t.TempDir()
@@ -206,7 +208,7 @@ func TestNewAppFallsBackToDefaultTheme(t *testing.T) {
 	model.DataDir = filepath.Join(model.TactHome, "data")
 	model.TodosDir = filepath.Join(model.DataDir, "todos")
 
-	if err := os.WriteFile(model.ConfigPath, []byte("{\"theme\":\"not-a-theme\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(model.ConfigPath, []byte("{\"theme\":\"not-a-theme\",\"style\":\"not-a-style\"}\n"), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -216,5 +218,11 @@ func TestNewAppFallsBackToDefaultTheme(t *testing.T) {
 	}
 	if currentTheme.Name != defaultThemeName {
 		t.Fatalf("currentTheme = %q, want %q", currentTheme.Name, defaultThemeName)
+	}
+	if app.styleName != defaultStyleName {
+		t.Fatalf("newApp() style = %q, want %q", app.styleName, defaultStyleName)
+	}
+	if currentStyle.Name != defaultStyleName {
+		t.Fatalf("currentStyle = %q, want %q", currentStyle.Name, defaultStyleName)
 	}
 }
