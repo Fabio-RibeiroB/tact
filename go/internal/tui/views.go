@@ -21,6 +21,7 @@ func renderTooSmall(w, h int) string {
 		w, h, minWidth, minHeight,
 	)
 	return lipgloss.NewStyle().
+		Background(colorBg).
 		Foreground(tokenFgTooSmall).
 		Padding(1, 2).
 		Render(msg)
@@ -178,7 +179,10 @@ func renderSessionTableHeader(width, sortMode int) string {
 		dim.Width(nameWidth).Render(nameLabel) +
 		dim.Width(3).Render(" ST")
 
-	return row
+	return lipgloss.NewStyle().
+		Background(tokenBgSurface).
+		Width(width).
+		Render(row)
 }
 
 func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
@@ -232,7 +236,10 @@ func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 			Width(width).
 			Render(row)
 	}
-	return lipgloss.NewStyle().Width(width).Render(row)
+	return lipgloss.NewStyle().
+		Background(tokenBgSurface).
+		Width(width).
+		Render(row)
 }
 
 func typeTag(t model.ProcessType) string {
@@ -317,7 +324,10 @@ func renderOutputTab(a App, width, height int) string {
 
 // ── Detail panel ────────────────────────────────────────────────────
 
-func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
+func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) string {
+	if width < 20 {
+		width = 20
+	}
 	if s == nil {
 		return panelHeadingStyle.Render("Overview") + "\n" +
 			lipgloss.NewStyle().Foreground(tokenFgMuted).
@@ -353,7 +363,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			lipgloss.NewStyle().Foreground(colorMagenta).Render("⎇ "+sanitizeField(s.GitBranch)))
 	}
 
-	lines = append(lines, "", divider(40))
+	lines = append(lines, "", divider(min(width, 40)))
 
 	if s.ContextPct > 0 || s.ContextTokens > 0 {
 		lines = append(lines, "")
@@ -368,7 +378,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	if s.LastActivity != "" {
 		activity := sanitizeField(s.LastActivity)
 		if len(activity) > 80 {
-			activity = activity[:80] + "…"
+			activity = activity[:min(width, 80)] + "…"
 		}
 		lines = append(lines, "",
 			lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
@@ -378,7 +388,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 	if s.TaskSummary != "" {
 		task := sanitizeField(s.TaskSummary)
 		if len(task) > 76 {
-			task = task[:76] + "…"
+			task = task[:min(width, 76)] + "…"
 		}
 		lines = append(lines, "",
 			lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render("Task: ")+
@@ -387,7 +397,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 
 	// Pane preview
 	if s.PaneContent != "" {
-		lines = append(lines, "", divider(40))
+		lines = append(lines, "", divider(min(width, 40)))
 
 		paneLines := strings.Split(s.PaneContent, "\n")
 		for len(paneLines) > 0 && strings.TrimSpace(paneLines[len(paneLines)-1]) == "" {
@@ -407,11 +417,12 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 		preview := paneLines[start:]
 
 		var colored []string
+		previewWidth := max(16, width-2)
 		for _, pl := range preview {
 			pl = strings.ReplaceAll(pl, "\r", "")
 			pl = strings.ReplaceAll(pl, "\t", "    ")
-			if runes := []rune(pl); len(runes) > 76 {
-				pl = string(runes[:76])
+			if runes := []rune(pl); len(runes) > previewWidth {
+				pl = string(runes[:previewWidth])
 			}
 			colored = append(colored, colorPreviewLine(pl))
 		}
@@ -425,7 +436,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			boxStyle = boxStyle.BorderForeground(colorYellow)
 			boxLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render(" INSERT ")
 		}
-		box := boxStyle.Width(78).Height(previewHeight).
+		box := boxStyle.Width(previewWidth).Height(previewHeight).
 			Render(strings.Join(colored, "\n"))
 
 		lines = append(lines, boxLabel, box)

@@ -850,7 +850,7 @@ const minHeight = 12
 
 func (a App) View() string {
 	if a.width == 0 {
-		return "Loading..."
+		return appStyle.Width(max(1, a.width)).Height(max(1, a.height)).Render("Loading...")
 	}
 
 	if a.width < minWidth || a.height < minHeight {
@@ -889,12 +889,12 @@ func (a App) View() string {
 	view := strings.Join(parts, "\n")
 
 	if a.showHelp {
-		return renderHelpOverlay(a.width, a.height)
+		return appStyle.Width(a.width).Height(a.height).Render(renderHelpOverlay(a.width, a.height))
 	}
 	if a.confirmMsg != "" {
-		return renderConfirmModal(a.confirmMsg, a.width, a.height)
+		return appStyle.Width(a.width).Height(a.height).Render(renderConfirmModal(a.confirmMsg, a.width, a.height))
 	}
-	return view
+	return appStyle.Width(a.width).Height(a.height).Render(view)
 }
 
 func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) string {
@@ -936,7 +936,7 @@ func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) st
 		s := filtered[a.selectedIdx]
 		selected = &s
 	}
-	detailContent := renderDetail(selected, bodyHeight, a.insertMode)
+	detailContent := renderDetail(selected, rightWidth-2, bodyHeight, a.insertMode)
 	rightPanel := panelBorder.Width(rightWidth).Height(bodyHeight).Render(detailContent)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -970,6 +970,18 @@ func (a *App) todoSectionHeight(totalHeight int, focused bool) int {
 
 func (a *App) renderTodoPanel(width, height int, focused bool) string {
 	var lines []string
+	panelLine := func(content string) string {
+		return lipgloss.NewStyle().
+			Background(tokenBgSurface).
+			Width(width).
+			Render(content)
+	}
+	panelSelectedLine := func(content string) string {
+		return lipgloss.NewStyle().
+			Background(tokenBgSelected).
+			Width(width).
+			Render(content)
+	}
 
 	count := len(a.todos)
 	headerText := fmt.Sprintf("Todos (%d)", count)
@@ -983,16 +995,16 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 	if focused {
 		hdrStyle = hdrStyle.Foreground(tokenFgAccent)
 	}
-	lines = append(lines, hdrStyle.Render(headerText))
+	lines = append(lines, panelLine(hdrStyle.Render(headerText)))
 
 	if !focused {
 		// In sessions tab: show hint to switch to todos tab
-		lines = append(lines, lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  2:manage todos"))
+		lines = append(lines, panelLine(lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  2:manage todos")))
 	}
 
 	if len(a.todos) == 0 && !a.todoInsert {
-		lines = append(lines, lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
-			Render("  (empty)"))
+		lines = append(lines, panelLine(lipgloss.NewStyle().Foreground(tokenFgMuted).Italic(true).
+			Render("  (empty)")))
 	}
 
 	maxItems := height - 2
@@ -1045,7 +1057,12 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 		if selected {
 			prefix = lipgloss.NewStyle().Foreground(tokenFgAccent).Render("▎ ")
 		}
-		lines = append(lines, prefix+lipgloss.NewStyle().Foreground(tokenFgMuted).Render(bullet)+" "+style.Render(text))
+		line := prefix + lipgloss.NewStyle().Foreground(tokenFgMuted).Render(bullet) + " " + style.Render(text)
+		if selected {
+			lines = append(lines, panelSelectedLine(line))
+		} else {
+			lines = append(lines, panelLine(line))
+		}
 	}
 
 	if a.todoInsert {
@@ -1054,10 +1071,10 @@ func (a *App) renderTodoPanel(width, height int, focused bool) string {
 		if len(input) > width-6 {
 			input = input[len(input)-width+6:]
 		}
-		lines = append(lines, cursor+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(input+"█"))
+		lines = append(lines, panelLine(cursor+lipgloss.NewStyle().Foreground(tokenFgDefault).Render(input+"█")))
 	} else if focused && len(lines) < height {
-		lines = append(lines,
-			lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  i:add  ⏎:done  d:del"))
+		lines = append(lines, panelLine(
+			lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  i:add  ⏎:done  d:del")))
 	}
 
 	return strings.Join(lines, "\n")

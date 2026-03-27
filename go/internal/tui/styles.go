@@ -129,6 +129,7 @@ var (
 	tokenFgAccent       lipgloss.Color
 	tokenBgSelected     lipgloss.Color
 	tokenBgAttention    lipgloss.Color
+	tokenBgSurface      lipgloss.Color
 	tokenBgHeader       lipgloss.Color
 	tokenBgTabBar       lipgloss.Color
 	tokenFgTooSmall     lipgloss.Color
@@ -144,6 +145,7 @@ var (
 	dividerStyle      lipgloss.Style
 
 	gradientColors []string
+	appStyle       lipgloss.Style
 )
 
 func init() {
@@ -216,6 +218,7 @@ func applyTheme(theme themeDefinition) {
 	tokenFgAccent = colorCyan
 	tokenBgSelected = theme.selectedBg
 	tokenBgAttention = theme.attentionBg
+	tokenBgSurface = colorSurface
 	tokenBgHeader = theme.headerBg
 	tokenBgTabBar = theme.tabBarBg
 	tokenFgTooSmall = theme.tooSmall
@@ -243,6 +246,9 @@ func applyTheme(theme themeDefinition) {
 		Background(colorSurface)
 	dividerStyle = lipgloss.NewStyle().Foreground(colorBorder)
 	gradientColors = theme.contextGradient
+	appStyle = lipgloss.NewStyle().
+		Foreground(colorText).
+		Background(colorBg)
 }
 
 var workingSpinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
