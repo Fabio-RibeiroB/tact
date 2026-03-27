@@ -20,6 +20,8 @@ Just run `tact` in a window within tmux and it will detect other panes/windows r
 - Get alerts when sessions need attention
 - Create and manage project-level todos synced across sessions
 - Preview pane output without switching panes
+- Wrap session navigation cyclically when moving past the first or last item
+- Switch between three built-in TUI themes and keep your choice across launches
 
 ## Installation
 
@@ -57,6 +59,7 @@ tact
 | `Enter` | Switch to selected pane |
 | `r` | Refresh session discovery |
 | `n` | Toggle notifications |
+| `T` | Cycle theme |
 | `i` | Enter insert mode in Sessions tab |
 | `Esc` | Exit insert mode |
 | `q` / `Ctrl+C` | Quit |

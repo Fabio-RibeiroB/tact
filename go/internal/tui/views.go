@@ -21,14 +21,14 @@ func renderTooSmall(w, h int) string {
 		w, h, minWidth, minHeight,
 	)
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#f7768e")).
+		Foreground(tokenFgTooSmall).
 		Padding(1, 2).
 		Render(msg)
 }
 
 // ── Header ──────────────────────────────────────────────────────────
 
-func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, selected *model.SessionInfo) string {
+func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, _ *model.SessionInfo, themeName string) string {
 	attn := 0
 	working := 0
 	for _, s := range sessions {
@@ -46,6 +46,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 		Render("⚡ TACT")
 
 	sessionPill := headerPill("Sessions", fmt.Sprintf("%d", len(sessions)), tokenFgDefault)
+	themePill := headerPill("Theme", themeDisplayName(themeName), tokenFgAccent)
 
 	var attnPill string
 	if attn > 0 {
@@ -62,7 +63,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 	}
 
 	left := lipgloss.JoinHorizontal(lipgloss.Center,
-		title, "  ", sessionPill, " ", attnPill)
+		title, "  ", sessionPill, " ", themePill, " ", attnPill)
 	right := lipgloss.JoinHorizontal(lipgloss.Center, notifyStr, " ", clockPill)
 
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 2
@@ -71,7 +72,7 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, s
 	}
 
 	bar := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1f2335")).
+		Background(tokenBgHeader).
 		Width(width).
 		Render(left + strings.Repeat(" ", gap) + right)
 
@@ -116,7 +117,7 @@ func renderTabBar(activeTab, width int, insertMode bool) string {
 
 	bar := "  " + strings.Join(parts, "   ")
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color("#1a1b26")).
+		Background(tokenBgTabBar).
 		Width(width).
 		Render(bar)
 }
@@ -148,7 +149,7 @@ func renderFilterBar(active bool, text string, total, shown int, width int) stri
 	}
 	line := "  " + prompt + strings.Repeat(" ", gap) + count
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color("#1f2335")).
+		Background(tokenBgHeader).
 		Width(width).
 		Render(line)
 }
@@ -221,13 +222,13 @@ func renderSessionTableRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 
 	if selected {
 		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#1e3a5f")).
+			Background(tokenBgSelected).
 			Width(width).
 			Render(row)
 	}
 	if s.Status == model.StatusNeedsAttention {
 		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#2d1b1b")).
+			Background(tokenBgAttention).
 			Width(width).
 			Render(row)
 	}
@@ -309,7 +310,7 @@ func renderOutputTab(a App, width, height int) string {
 		colored = append(colored, colorPreviewLine(pl))
 	}
 
-	help := helpStyle.Render("j/k:navigate  ⏎:switch  ?:help")
+	help := helpStyle.Render("j/k:navigate  T:theme  ⏎:switch  ?:help")
 	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
 	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
@@ -436,7 +437,7 @@ func renderDetail(s *model.SessionInfo, height int, insertMode bool) string {
 			lipgloss.NewStyle().Bold(true).Foreground(colorYellow).
 				Render("── INSERT ──  type to send to pane  Esc: exit"))
 	} else {
-		parts := []string{"i:insert", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
+		parts := []string{"i:insert", "T:theme", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
 		lines = append(lines, "", helpStyle.Render(strings.Join(parts, "  ")))
 	}
 
@@ -477,6 +478,7 @@ func renderHelpOverlay(width, height int) string {
 		kv("?", "toggle help"),
 		kv("r", "refresh sessions"),
 		kv("n", "toggle notify"),
+		kv("T", "cycle theme"),
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Session Actions"),
 		kv("j / k", "navigate"),
@@ -535,7 +537,8 @@ func renderHelpOverlay(width, height int) string {
 		Render(
 			lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("  Help  ") + "\n\n" +
 				strings.Join(rows, "\n") + "\n\n" +
-				lipgloss.NewStyle().Foreground(tokenFgMuted).Render("? or Esc to close"),
+				lipgloss.NewStyle().Foreground(tokenFgMuted).
+					Render(fmt.Sprintf("Theme: %s   ? or Esc to close", themeDisplayName(currentTheme.Name))),
 		)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)

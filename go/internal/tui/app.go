@@ -79,14 +79,19 @@ type App struct {
 
 	// Environment
 	sshSafe bool
+
+	themeName string
 }
 
 func newApp() App {
+	cfg := model.LoadConfig()
+	themeName := applyThemeByName(cfg.Theme)
 	a := App{
 		activeTab:     tabSessions,
 		notifyEnabled: true,
 		prevStatuses:  make(map[string]model.SessionStatus),
 		blinkOn:       true,
+		themeName:     themeName,
 	}
 	if isSSH() {
 		a.sshSafe = true
@@ -329,6 +334,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		a.notifyEnabled = !a.notifyEnabled
 		return *a, nil
+	case "T":
+		a.themeName = nextThemeName(a.themeName)
+		a.themeName = applyThemeByName(a.themeName)
+		_ = model.SaveConfig(model.UIConfig{Theme: a.themeName})
+		return *a, nil
 	case "?":
 		a.showHelp = !a.showHelp
 		return *a, nil
@@ -359,17 +369,9 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	filtered := a.filteredSessions()
 	switch msg.String() {
 	case "j", "down":
-		if a.selectedIdx < len(filtered)-1 {
-			a.selectedIdx++
-			a.refreshTodos()
-			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
-		}
+		return a.moveSessionSelection(filtered, 1)
 	case "k", "up":
-		if a.selectedIdx > 0 {
-			a.selectedIdx--
-			a.refreshTodos()
-			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
-		}
+		return a.moveSessionSelection(filtered, -1)
 	case "g", "home":
 		a.selectedIdx = 0
 		a.refreshTodos()
@@ -419,17 +421,9 @@ func (a *App) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	filtered := a.filteredSessions()
 	switch msg.String() {
 	case "j", "down":
-		if a.selectedIdx < len(filtered)-1 {
-			a.selectedIdx++
-			a.refreshTodos()
-			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
-		}
+		return a.moveSessionSelection(filtered, 1)
 	case "k", "up":
-		if a.selectedIdx > 0 {
-			a.selectedIdx--
-			a.refreshTodos()
-			return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
-		}
+		return a.moveSessionSelection(filtered, -1)
 	case "g", "home":
 		a.selectedIdx = 0
 		a.refreshTodos()
@@ -569,6 +563,26 @@ func (a *App) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.confirmCmd = ""
 	}
 	return *a, nil
+}
+
+func wrappedIndex(current, total, delta int) int {
+	if total <= 0 {
+		return 0
+	}
+	next := (current + delta) % total
+	if next < 0 {
+		next += total
+	}
+	return next
+}
+
+func (a *App) moveSessionSelection(filtered []model.SessionInfo, delta int) (tea.Model, tea.Cmd) {
+	if len(filtered) == 0 {
+		return *a, nil
+	}
+	a.selectedIdx = wrappedIndex(a.selectedIdx, len(filtered), delta)
+	a.refreshTodos()
+	return *a, doPaneUpdate([]model.SessionInfo{filtered[a.selectedIdx]})
 }
 
 // ── Filter and sort ──────────────────────────────────────────────
@@ -843,7 +857,7 @@ func (a App) View() string {
 		return renderTooSmall(a.width, a.height)
 	}
 
-	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession())
+	header := renderHeader(a.sessions, a.width, a.notifyEnabled, a.selectedSession(), a.themeName)
 	tabBar := renderTabBar(a.activeTab, a.width, a.insertMode)
 	headerLines := strings.Count(header, "\n") + 1
 

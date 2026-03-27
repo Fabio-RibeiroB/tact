@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -157,5 +159,62 @@ func TestActivityTimestamp(t *testing.T) {
 				t.Fatalf("activityTimestamp() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWrappedIndex(t *testing.T) {
+	tests := []struct {
+		name    string
+		current int
+		total   int
+		delta   int
+		want    int
+	}{
+		{name: "empty list stays zero", current: 0, total: 0, delta: 1, want: 0},
+		{name: "single item wraps to itself", current: 0, total: 1, delta: 1, want: 0},
+		{name: "wrap forward from end", current: 2, total: 3, delta: 1, want: 0},
+		{name: "wrap backward from start", current: 0, total: 3, delta: -1, want: 2},
+		{name: "move within bounds", current: 1, total: 3, delta: 1, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrappedIndex(tt.current, tt.total, tt.delta)
+			if got != tt.want {
+				t.Fatalf("wrappedIndex(%d, %d, %d) = %d, want %d", tt.current, tt.total, tt.delta, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewAppFallsBackToDefaultTheme(t *testing.T) {
+	oldTactHome := model.TactHome
+	oldConfigPath := model.ConfigPath
+	oldDataDir := model.DataDir
+	oldTodosDir := model.TodosDir
+	oldTheme := currentTheme.Name
+	t.Cleanup(func() {
+		model.TactHome = oldTactHome
+		model.ConfigPath = oldConfigPath
+		model.DataDir = oldDataDir
+		model.TodosDir = oldTodosDir
+		applyThemeByName(oldTheme)
+	})
+
+	model.TactHome = t.TempDir()
+	model.ConfigPath = filepath.Join(model.TactHome, "config.json")
+	model.DataDir = filepath.Join(model.TactHome, "data")
+	model.TodosDir = filepath.Join(model.DataDir, "todos")
+
+	if err := os.WriteFile(model.ConfigPath, []byte("{\"theme\":\"not-a-theme\"}\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	app := newApp()
+	if app.themeName != defaultThemeName {
+		t.Fatalf("newApp() theme = %q, want %q", app.themeName, defaultThemeName)
+	}
+	if currentTheme.Name != defaultThemeName {
+		t.Fatalf("currentTheme = %q, want %q", currentTheme.Name, defaultThemeName)
 	}
 }
