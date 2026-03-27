@@ -351,15 +351,15 @@ func renderSessionCardRow(s model.SessionInfo, selected, blinkOn bool, spinnerId
 
 	iconLine := lipgloss.NewStyle().Foreground(tokenFgMuted).
 		Render(statusIcon(s.Status, blinkOn, spinnerIdx) + " " + meta)
+	taskLine := ""
 	if s.TaskSummary != "" {
 		task := sanitizeField(s.TaskSummary)
 		if len([]rune(task)) > max(8, width-4) {
 			task = string([]rune(task)[:max(7, width-5)]) + "…"
 		}
-		return rowStyle.Render(title + "\n" + iconLine + "\n" +
-			lipgloss.NewStyle().Foreground(tokenFgMuted).Render(task))
+		taskLine = lipgloss.NewStyle().Foreground(tokenFgMuted).Render(task)
 	}
-	return rowStyle.Render(title + "\n" + iconLine)
+	return rowStyle.Render(title + "\n" + iconLine + "\n" + taskLine)
 }
 
 func renderSessionRetroRow(s model.SessionInfo, selected, blinkOn bool, spinnerIdx, width int) string {
