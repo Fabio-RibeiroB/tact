@@ -24,6 +24,21 @@ func TestSessionInfoNameMethods(t *testing.T) {
 	if got := s.DisplayName(); got != "wordle-fix" {
 		t.Fatalf("DisplayName() with custom name = %q, want %q", got, "wordle-fix")
 	}
+	s.ManualTask = "patch sunset-grid bleed"
+	if got := s.WorkingTask(); got != "patch sunset-grid bleed" {
+		t.Fatalf("WorkingTask() with manual task = %q, want %q", got, "patch sunset-grid bleed")
+	}
+	if got := s.ManualWorkingTask(); got != "patch sunset-grid bleed" {
+		t.Fatalf("ManualWorkingTask() = %q, want %q", got, "patch sunset-grid bleed")
+	}
+	s.ManualTask = ""
+	s.TaskSummary = "fix session colors"
+	if got := s.WorkingTask(); got != "fix session colors" {
+		t.Fatalf("WorkingTask() with inferred task = %q, want %q", got, "fix session colors")
+	}
+	if got := s.ManualWorkingTask(); got != "" {
+		t.Fatalf("ManualWorkingTask() without manual value = %q, want empty", got)
+	}
 	if got := s.RenameKey(); got != "codex:session:abc123" {
 		t.Fatalf("RenameKey() = %q, want %q", got, "codex:session:abc123")
 	}

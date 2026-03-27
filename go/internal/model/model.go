@@ -98,13 +98,14 @@ type SessionInfo struct {
 	Cwd           string
 	ProjectName   string
 	CustomName    string
+	ManualTask    string
 	GitBranch     string
 	Status        SessionStatus
 	ContextPct    int
 	ContextTokens int
 	ContextMax    int
 	LastActivity  string
-	TaskSummary   string    // what the session is working on (last user prompt)
+	TaskSummary   string    // inferred working summary/topic
 	LastChecked   time.Time // semantic activity age used by the UI's AGO column
 	LastPolled    time.Time // last successful TUI pane poll for this session
 	PaneContent   string    // last captured pane output for preview
@@ -125,6 +126,17 @@ func (s *SessionInfo) DisplayName() string {
 		return s.CustomName
 	}
 	return s.BaseName()
+}
+
+func (s *SessionInfo) WorkingTask() string {
+	if task := normalizeStoredTask(s.ManualTask); task != "" {
+		return task
+	}
+	return normalizeStoredTask(s.TaskSummary)
+}
+
+func (s *SessionInfo) ManualWorkingTask() string {
+	return normalizeStoredTask(s.ManualTask)
 }
 
 func (s *SessionInfo) RenameKey() string {

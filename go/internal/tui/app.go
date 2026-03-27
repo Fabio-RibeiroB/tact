@@ -78,6 +78,8 @@ type App struct {
 	confirmCmd string // action to execute on confirm
 	renameMode bool
 	renameInput string
+	taskMode   bool
+	taskInput  string
 
 	// Environment
 	sshSafe bool
@@ -85,6 +87,7 @@ type App struct {
 	themeName string
 	styleName string
 	sessionNames model.SessionNames
+	sessionTasks model.SessionTasks
 }
 
 func newApp() App {
@@ -99,6 +102,7 @@ func newApp() App {
 		themeName:     themeName,
 		styleName:     styleName,
 		sessionNames:  model.LoadSessionNames(),
+		sessionTasks:  model.LoadSessionTasks(),
 	}
 	if isSSH() {
 		a.sshSafe = true
@@ -181,8 +185,10 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 					s.ContextPct = pct
 				}
 			}
-			if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
-				s.TaskSummary = sanitizeField(task)
+			if s.ProcessType == model.ProcessKiro || s.ProcessType == model.ProcessOpencode {
+				if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
+					s.TaskSummary = chooseTaskSummary("", "", sanitizeField(task))
+				}
 			}
 		}
 		return paneUpdateMsg(sessions)
@@ -198,12 +204,18 @@ func doSessionDataUpdate(sessions []model.SessionInfo) tea.Cmd {
 				if data.LastMessage != "" {
 					s.LastActivity = sanitizeField(data.LastMessage)
 				}
-				if s.TaskSummary == "" {
-					if data.FirstHumanMessage != "" {
-						s.TaskSummary = sanitizeField(data.FirstHumanMessage)
-					} else if data.LastHumanMessage != "" {
-						s.TaskSummary = sanitizeField(data.LastHumanMessage)
-					}
+				if s.ProcessType == model.ProcessCodex || s.ProcessType == model.ProcessClaude {
+					s.TaskSummary = chooseTaskSummary(
+						sanitizeField(data.FirstHumanMessage),
+						sanitizeField(data.LastHumanMessage),
+						s.TaskSummary,
+					)
+				} else if s.TaskSummary == "" {
+					s.TaskSummary = chooseTaskSummary(
+						sanitizeField(data.FirstHumanMessage),
+						sanitizeField(data.LastHumanMessage),
+						s.TaskSummary,
+					)
 				}
 			}
 		}
@@ -233,6 +245,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.renameMode {
 			return a.handleRenameKey(msg)
+		}
+		if a.taskMode {
+			return a.handleTaskKey(msg)
 		}
 		if a.showHelp {
 			a.showHelp = false
@@ -437,6 +452,14 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.renameInput = s.BaseName()
 			}
 		}
+	case "W":
+		if s := a.selectedSession(); s != nil {
+			a.taskMode = true
+			a.taskInput = s.ManualTask
+			if a.taskInput == "" {
+				a.taskInput = s.WorkingTask()
+			}
+		}
 	}
 	return *a, nil
 }
@@ -470,6 +493,14 @@ func (a *App) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.renameInput = s.CustomName
 			if a.renameInput == "" {
 				a.renameInput = s.BaseName()
+			}
+		}
+	case "W":
+		if s := a.selectedSession(); s != nil {
+			a.taskMode = true
+			a.taskInput = s.ManualTask
+			if a.taskInput == "" {
+				a.taskInput = s.WorkingTask()
 			}
 		}
 	}
@@ -585,6 +616,38 @@ func (a *App) handleRenameKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if r := msg.String(); len(r) == 1 {
 			a.renameInput += r
+		}
+	}
+	return *a, nil
+}
+
+func (a *App) handleTaskKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		a.taskMode = false
+		a.taskInput = ""
+	case tea.KeyEnter:
+		if s := a.selectedSession(); s != nil {
+			key := s.RenameKey()
+			trimmed := normalizeTaskSummary(a.taskInput)
+			if trimmed == "" {
+				delete(a.sessionTasks, key)
+				s.ManualTask = ""
+			} else {
+				a.sessionTasks[key] = trimmed
+				s.ManualTask = trimmed
+			}
+			_ = model.SaveSessionTasks(a.sessionTasks)
+		}
+		a.taskMode = false
+		a.taskInput = ""
+	case tea.KeyBackspace:
+		if len(a.taskInput) > 0 {
+			a.taskInput = a.taskInput[:len(a.taskInput)-1]
+		}
+	default:
+		if r := msg.String(); len(r) == 1 {
+			a.taskInput += r
 		}
 	}
 	return *a, nil
@@ -787,6 +850,9 @@ func mergeFields(u *model.SessionInfo, prev *model.SessionInfo) {
 	if u.CustomName == "" && prev.CustomName != "" {
 		u.CustomName = prev.CustomName
 	}
+	if u.ManualTask == "" && prev.ManualTask != "" {
+		u.ManualTask = prev.ManualTask
+	}
 	if !prev.LastChecked.IsZero() {
 		u.LastChecked = prev.LastChecked
 	}
@@ -804,6 +870,15 @@ func (a *App) applySessionName(s *model.SessionInfo) {
 	}
 	if name, ok := a.sessionNames[s.RenameKey()]; ok {
 		s.CustomName = name
+	}
+}
+
+func (a *App) applySessionTask(s *model.SessionInfo) {
+	if s == nil {
+		return
+	}
+	if task, ok := a.sessionTasks[s.RenameKey()]; ok {
+		s.ManualTask = task
 	}
 }
 
@@ -853,6 +928,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 			mergeFields(&u, prev)
 		}
 		a.applySessionName(&u)
+		a.applySessionTask(&u)
 		merged = append(merged, u)
 	}
 
@@ -863,6 +939,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 				continue
 			}
 			a.applySessionName(&prev)
+			a.applySessionTask(&prev)
 			prev.Status = model.StatusDisconnected
 			merged = append(merged, prev)
 		}
@@ -892,9 +969,117 @@ func (a *App) updateSessions(updated []model.SessionInfo) {
 		prev := a.sessions[i]
 		mergeFields(&u, &prev)
 		a.applySessionName(&u)
+		a.applySessionTask(&u)
 		u.LastChecked = activityTimestamp(prev, u, time.Now())
 		a.sessions[i] = u
 	}
+}
+
+func chooseTaskSummary(first, last, fallback string) string {
+	first = normalizeTaskSummary(first)
+	last = normalizeTaskSummary(last)
+	fallback = normalizeTaskSummary(fallback)
+
+	if isSubstantiveTask(first) {
+		return first
+	}
+	if isSubstantiveTask(last) {
+		return last
+	}
+	if isSubstantiveTask(fallback) {
+		return fallback
+	}
+	if first != "" {
+		return first
+	}
+	if last != "" {
+		return last
+	}
+	return fallback
+}
+
+func normalizeTaskSummary(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = stripEnvironmentContext(s)
+	s = strings.Join(strings.Fields(s), " ")
+	s = stripTaskLabelPrefix(s)
+	if looksLikeSessionMetadata(s) {
+		return ""
+	}
+	return s
+}
+
+func stripTaskLabelPrefix(s string) string {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	prefixes := []string{"working:", "prompt:", "task:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(s[len(prefix):])
+		}
+	}
+	return s
+}
+
+func stripEnvironmentContext(s string) string {
+	startTag := "<environment_context>"
+	endTag := "</environment_context>"
+	for {
+		start := strings.Index(s, startTag)
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start:], endTag)
+		if end == -1 {
+			s = strings.TrimSpace(s[:start])
+			break
+		}
+		end += start + len(endTag)
+		s = strings.TrimSpace(s[:start] + " " + s[end:])
+	}
+	return s
+}
+
+func looksLikeSessionMetadata(s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	if lower == "" {
+		return false
+	}
+	metaMarkers := []string{
+		"<cwd>", "</cwd>", "<shell>", "</shell>",
+		"<current_date>", "</current_date>",
+		"<timezone>", "</timezone>",
+	}
+	for _, marker := range metaMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return strings.HasPrefix(lower, "cwd:") ||
+		strings.HasPrefix(lower, "shell:") ||
+		strings.HasPrefix(lower, "current_date:") ||
+		strings.HasPrefix(lower, "timezone:")
+}
+
+func isSubstantiveTask(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return false
+	}
+	trivial := map[string]struct{}{
+		"y": {}, "yes": {}, "ok": {}, "okay": {}, "sure": {}, "thanks": {},
+		"thank you": {}, "continue": {}, "go ahead": {}, "do it": {},
+		"try that": {}, "push": {}, "ship it": {}, "sounds good": {},
+	}
+	if _, ok := trivial[s]; ok {
+		return false
+	}
+	if len([]rune(s)) < 12 && !strings.Contains(s, " ") {
+		return false
+	}
+	return true
 }
 
 func (a *App) selectedSession() *model.SessionInfo {
@@ -986,6 +1171,13 @@ func (a App) View() string {
 			baseName = s.BaseName()
 		}
 		return appStyle.Width(a.width).Height(a.height).Render(renderRenameModal(a.renameInput, baseName, a.width, a.height))
+	}
+	if a.taskMode {
+		current := ""
+		if s := a.selectedSession(); s != nil {
+			current = s.TaskSummary
+		}
+		return appStyle.Width(a.width).Height(a.height).Render(renderTaskModal(a.taskInput, current, a.width, a.height))
 	}
 	return appStyle.Width(a.width).Height(a.height).Render(view)
 }

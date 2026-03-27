@@ -352,8 +352,8 @@ func renderSessionCardRow(s model.SessionInfo, selected, blinkOn bool, spinnerId
 	iconLine := lipgloss.NewStyle().Foreground(tokenFgMuted).
 		Render(statusIcon(s.Status, blinkOn, spinnerIdx) + " " + meta)
 	taskLine := ""
-	if s.TaskSummary != "" {
-		task := sanitizeField(s.TaskSummary)
+	if s.ManualWorkingTask() != "" {
+		task := sanitizeField(s.ManualWorkingTask())
 		if len([]rune(task)) > max(8, width-4) {
 			task = string([]rune(task)[:max(7, width-5)]) + "…"
 		}
@@ -473,7 +473,7 @@ func renderOutputTab(a App, width, height int) string {
 		colored = append(colored, colorPreviewLine(pl))
 	}
 
-	help := helpStyle.Render("j/k:navigate  R:rename  T:theme  S:style  ⏎:switch  ?:help")
+	help := helpStyle.Render("j/k:navigate  R:rename  W:task  T:theme  S:style  ⏎:switch  ?:help")
 	content := title + "\n\n" + strings.Join(colored, "\n") + "\n\n" + help
 	return activePanelBorder.Width(panelWidth).Height(height).Render(content)
 }
@@ -545,13 +545,13 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 				Render("Last: "+activity))
 	}
 
-	if s.TaskSummary != "" {
-		task := sanitizeField(s.TaskSummary)
+	if s.ManualWorkingTask() != "" {
+		task := sanitizeField(s.ManualWorkingTask())
 		if len(task) > 76 {
 			task = task[:min(width, 76)] + "…"
 		}
 		lines = append(lines, "",
-			lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render("Task: ")+
+			lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render("Working: ")+
 				lipgloss.NewStyle().Foreground(tokenFgDefault).Render(task))
 	}
 
@@ -612,7 +612,7 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 			lipgloss.NewStyle().Bold(true).Foreground(colorYellow).
 				Render(detailHeading("Insert") + "  type to send to pane  Esc: exit"))
 	} else {
-		parts := []string{"R:rename", "i:insert", "T:theme", "S:style", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
+		parts := []string{"R:rename", "W:task", "i:insert", "T:theme", "S:style", "y/a/!:respond", "j/k:nav", "⏎:switch", "?:help", "1-3:tabs", "q:quit"}
 		lines = append(lines, "", helpStyle.Render(strings.Join(parts, "  ")))
 	}
 
@@ -653,6 +653,7 @@ func renderHelpOverlay(width, height int) string {
 		kv("?", "toggle help"),
 		kv("r", "refresh sessions"),
 		kv("R", "rename session"),
+		kv("W", "set working task"),
 		kv("n", "toggle notify"),
 		kv("T", "cycle theme"),
 		kv("S", "cycle style"),
@@ -768,6 +769,34 @@ func renderRenameModal(input, baseName string, width, height int) string {
 		Render(title + "\n\n" + current + "\n\n" + entry + "\n\n" + hint)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func renderTaskModal(input, guessed string, width, height int) string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Set Working Task")
+	current := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render("Auto guess: " + fallbackModalValue(guessed))
+	entry := lipgloss.NewStyle().
+		Border(currentStyle.confirmBorder).
+		BorderForeground(tokenBorderFocused).
+		Padding(0, 1).
+		Render(input + "█")
+	hint := lipgloss.NewStyle().Foreground(tokenFgMuted).
+		Render("Enter: save   Esc: cancel   clear to return to auto mode")
+
+	content := lipgloss.NewStyle().
+		Border(currentStyle.confirmBorder).
+		BorderForeground(tokenBorderFocused).
+		Padding(1, 2).
+		Render(title + "\n\n" + current + "\n\n" + entry + "\n\n" + hint)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func fallbackModalValue(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "none"
+	}
+	return s
 }
 
 // ── Todos ───────────────────────────────────────────────────────────
