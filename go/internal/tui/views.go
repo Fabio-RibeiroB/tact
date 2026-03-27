@@ -60,6 +60,27 @@ func renderHeader(sessions []model.SessionInfo, width int, notifyEnabled bool, _
 		notifyStr = lipgloss.NewStyle().Foreground(tokenFgMuted).Render("🔕")
 	}
 
+	if isRetroStyle() {
+		left := strings.Join([]string{
+			title,
+			sessionPill,
+			themePill,
+			stylePill,
+			attnPill,
+		}, " ")
+		right := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(
+			fmt.Sprintf("[%s %s]", notifyStr, time.Now().Format("15:04:05")),
+		)
+		gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
+		if gap < 1 {
+			gap = 1
+		}
+		return lipgloss.NewStyle().
+			Background(tokenBgHeader).
+			Width(width).
+			Render(left + strings.Repeat(" ", gap) + right)
+	}
+
 	left := lipgloss.JoinHorizontal(lipgloss.Center,
 		title, "  ", sessionPill, " ", themePill, " ", stylePill, " ", attnPill)
 	right := lipgloss.JoinHorizontal(lipgloss.Center, notifyStr, " ", clockPill)
@@ -134,7 +155,11 @@ func renderFilterBar(active bool, text string, total, shown int, width int) stri
 		prompt = cursor + " " + inputText
 	} else {
 		// Filter applied but bar hidden
-		badge := lipgloss.NewStyle().Foreground(tokenFgWarning).Render("[filter: " + text + "]")
+		label := "[filter: " + text + "]"
+		if isRetroStyle() {
+			label = "[ FILTER " + text + " ]"
+		}
+		badge := lipgloss.NewStyle().Foreground(tokenFgWarning).Render(label)
 		prompt = badge
 	}
 
@@ -346,17 +371,15 @@ func renderSessionRetroRow(s model.SessionInfo, selected, blinkOn bool, spinnerI
 	if s.Status == model.StatusUnknown {
 		status = "POLL"
 	}
-	name := sanitizeField(s.DisplayName())
-	line := fmt.Sprintf("%s[%s] [%s] %s %s",
-		prefix,
-		strings.ToUpper(s.ProcessType.String()),
-		status,
-		statusIcon(s.Status, blinkOn, spinnerIdx),
-		name,
-	)
-	if len([]rune(line)) > width {
-		line = string([]rune(line)[:max(1, width-1)]) + "…"
+	typeLabel := strings.ToUpper(s.ProcessType.String())
+	if typeLabel == "" {
+		typeLabel = "AI"
 	}
+	icon := statusIcon(s.Status, blinkOn, spinnerIdx)
+	meta := fmt.Sprintf("[%s|%s] %s ", typeLabel, status, icon)
+	nameWidth := max(8, width-lipgloss.Width(prefix)-lipgloss.Width(meta))
+	name := truncateRunes(sanitizeField(s.DisplayName()), nameWidth)
+	line := prefix + meta + name
 	style := lipgloss.NewStyle().Background(tokenBgSurface).Width(width)
 	if selected {
 		style = style.Background(tokenBgSelected).Foreground(tokenFgAccent).Bold(true)
@@ -555,14 +578,19 @@ func renderDetail(s *model.SessionInfo, width, height int, insertMode bool) stri
 		}
 
 		boxStyle := previewBorder
-		boxLabel := lipgloss.NewStyle().Foreground(tokenFgMuted).Render(" Preview ")
+		boxLabel := lipgloss.NewStyle().Foreground(tokenFgAccent).Bold(true).Render("Preview")
 		if insertMode {
 			boxStyle = boxStyle.BorderForeground(colorYellow)
 			boxLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Render(" INSERT ")
 		}
-		box := boxStyle.Width(previewWidth).Height(previewHeight).
-			Render(strings.Join(colored, "\n"))
-		lines = append(lines, boxLabel, box)
+		if isRetroStyle() {
+			lines = append(lines, boxLabel)
+			lines = append(lines, colored...)
+		} else {
+			box := boxStyle.Width(previewWidth).Height(previewHeight).
+				Render(strings.Join(colored, "\n"))
+			lines = append(lines, boxLabel, box)
+		}
 	}
 
 	// Help / insert mode indicator
@@ -696,6 +724,12 @@ func renderConfirmModal(msg string, width, height int) string {
 		Border(currentStyle.confirmBorder).
 		BorderForeground(tokenFgDanger).
 		Padding(1, 3)
+	if isRetroStyle() {
+		style = lipgloss.NewStyle().
+			Border(currentStyle.confirmBorder).
+			BorderForeground(tokenFgDanger).
+			Padding(0, 2)
+	}
 	content := style.Render(line1 + "\n\n" + line2)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)

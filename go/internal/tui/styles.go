@@ -465,6 +465,15 @@ func renderContextBar(pct, width int) string {
 }
 
 func headerPill(label, value string, fg lipgloss.Color) string {
+	if currentStyle.Name == "retro-bracket" {
+		content := value
+		if label != "" {
+			content = label + " " + value
+		}
+		return lipgloss.NewStyle().
+			Foreground(fg).
+			Render("[ " + content + " ]")
+	}
 	l := lipgloss.NewStyle().Foreground(colorDim).Render(label)
 	v := lipgloss.NewStyle().Foreground(fg).Bold(true).Render(value)
 	content := l + v
@@ -489,6 +498,10 @@ func appTitle() string {
 
 func styleTab(key string) string {
 	return currentStyle.tabOpen + key + currentStyle.tabClose
+}
+
+func isRetroStyle() bool {
+	return currentStyle.Name == "retro-bracket"
 }
 
 func todoIcon(s model.TodoStatus) string {
