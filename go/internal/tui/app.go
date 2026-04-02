@@ -915,18 +915,7 @@ func (a *App) mergeSessions(discovered []model.SessionInfo) {
 		merged = append(merged, u)
 	}
 
-	// Keep sessions not found by discovery as Disconnected only while their process still exists.
-	for _, prev := range a.sessions {
-		if !inDiscovery[prev.PaneID] {
-			if !tmux.PaneContainsPID(prev.PaneID, prev.ProcessPID) {
-				continue
-			}
-			a.applySessionName(&prev)
-			a.applySessionTask(&prev)
-			prev.Status = model.StatusDisconnected
-			merged = append(merged, prev)
-		}
-	}
+	// Sessions not found by discovery are dropped (AI process has exited).
 
 	a.sessions = merged
 	if a.selectedIdx >= len(a.sessions) {

@@ -67,22 +67,6 @@ func ListPanes() ([]PaneInfo, error) {
 	return panes, nil
 }
 
-// PaneContainsPID reports whether targetPID is still in the process tree rooted at paneID.
-func PaneContainsPID(paneID string, targetPID int) bool {
-	panes, err := ListPanes()
-	if err != nil {
-		return false
-	}
-	for _, pane := range panes {
-		if pane.PaneID == paneID {
-			if targetPID <= 0 {
-				return true
-			}
-			return processTreeContainsPID(pane.PanePID, targetPID)
-		}
-	}
-	return false
-}
 
 // FindAIProcess walks the process tree from panePID via BFS (max depth 5).
 // Claude is checked first, then Codex, then Kiro, then Opencode.
