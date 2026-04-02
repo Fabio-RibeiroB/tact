@@ -129,10 +129,7 @@ func (s *SessionInfo) DisplayName() string {
 }
 
 func (s *SessionInfo) WorkingTask() string {
-	if task := normalizeStoredTask(s.ManualTask); task != "" {
-		return task
-	}
-	return normalizeStoredTask(s.TaskSummary)
+	return normalizeStoredTask(s.ManualTask)
 }
 
 func (s *SessionInfo) ManualWorkingTask() string {

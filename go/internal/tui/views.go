@@ -771,32 +771,23 @@ func renderRenameModal(input, baseName string, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
-func renderTaskModal(input, guessed string, width, height int) string {
+func renderTaskModal(input string, width, height int) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(tokenFgAccent).Render("Set Working Task")
-	current := lipgloss.NewStyle().Foreground(tokenFgMuted).
-		Render("Auto guess: " + fallbackModalValue(guessed))
 	entry := lipgloss.NewStyle().
 		Border(currentStyle.confirmBorder).
 		BorderForeground(tokenBorderFocused).
 		Padding(0, 1).
 		Render(input + "█")
 	hint := lipgloss.NewStyle().Foreground(tokenFgMuted).
-		Render("Enter: save   Esc: cancel   clear to return to auto mode")
+		Render("Enter: save   Esc: cancel   clear to reset")
 
 	content := lipgloss.NewStyle().
 		Border(currentStyle.confirmBorder).
 		BorderForeground(tokenBorderFocused).
 		Padding(1, 2).
-		Render(title + "\n\n" + current + "\n\n" + entry + "\n\n" + hint)
+		Render(title + "\n\n" + entry + "\n\n" + hint)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
-}
-
-func fallbackModalValue(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "none"
-	}
-	return s
 }
 
 // ── Todos ───────────────────────────────────────────────────────────

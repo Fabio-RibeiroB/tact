@@ -185,11 +185,6 @@ func doPaneUpdate(sessions []model.SessionInfo) tea.Cmd {
 					s.ContextPct = pct
 				}
 			}
-			if s.ProcessType == model.ProcessKiro || s.ProcessType == model.ProcessOpencode {
-				if task := parser.ExtractTaskSummary(clean, s.ProcessType); task != "" {
-					s.TaskSummary = chooseTaskSummary("", "", sanitizeField(task))
-				}
-			}
 		}
 		return paneUpdateMsg(sessions)
 	}
@@ -204,19 +199,7 @@ func doSessionDataUpdate(sessions []model.SessionInfo) tea.Cmd {
 				if data.LastMessage != "" {
 					s.LastActivity = sanitizeField(data.LastMessage)
 				}
-				if s.ProcessType == model.ProcessCodex || s.ProcessType == model.ProcessClaude {
-					s.TaskSummary = chooseTaskSummary(
-						sanitizeField(data.FirstHumanMessage),
-						sanitizeField(data.LastHumanMessage),
-						s.TaskSummary,
-					)
-				} else if s.TaskSummary == "" {
-					s.TaskSummary = chooseTaskSummary(
-						sanitizeField(data.FirstHumanMessage),
-						sanitizeField(data.LastHumanMessage),
-						s.TaskSummary,
-					)
-				}
+
 			}
 		}
 		return sessionDataUpdateMsg(sessions)
@@ -358,6 +341,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return *a, doDiscovery
 	case "n":
+		if a.activeTab == tabSessions {
+			if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention && s.ProcessType == model.ProcessKiro {
+				tmux.SendKeys(s.PaneID, "n", "Enter")
+				return *a, nil
+			}
+		}
 		a.notifyEnabled = !a.notifyEnabled
 		return *a, nil
 	case "T":
@@ -422,7 +411,7 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		if s := a.selectedSession(); s != nil && s.Status == model.StatusNeedsAttention {
 			if s.ProcessType == model.ProcessKiro {
-				tmux.SendKeys(s.PaneID, "y")
+				tmux.SendKeys(s.PaneID, "y", "Enter")
 			} else {
 				tmux.SendKeys(s.PaneID, "Enter")
 			}
@@ -456,9 +445,6 @@ func (a *App) handleSessionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if s := a.selectedSession(); s != nil {
 			a.taskMode = true
 			a.taskInput = s.ManualTask
-			if a.taskInput == "" {
-				a.taskInput = s.WorkingTask()
-			}
 		}
 	}
 	return *a, nil
@@ -499,9 +485,6 @@ func (a *App) handleOutputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if s := a.selectedSession(); s != nil {
 			a.taskMode = true
 			a.taskInput = s.ManualTask
-			if a.taskInput == "" {
-				a.taskInput = s.WorkingTask()
-			}
 		}
 	}
 	return *a, nil
@@ -725,7 +708,7 @@ func (a *App) filteredSessions() []model.SessionInfo {
 		for _, s := range sessions {
 			if strings.Contains(strings.ToLower(s.DisplayName()), lower) ||
 				strings.Contains(strings.ToLower(s.GitBranch), lower) ||
-				strings.Contains(strings.ToLower(s.TaskSummary), lower) {
+				strings.Contains(strings.ToLower(s.ManualTask), lower) {
 				filtered = append(filtered, s)
 			}
 		}
@@ -975,29 +958,6 @@ func (a *App) updateSessions(updated []model.SessionInfo) {
 	}
 }
 
-func chooseTaskSummary(first, last, fallback string) string {
-	first = normalizeTaskSummary(first)
-	last = normalizeTaskSummary(last)
-	fallback = normalizeTaskSummary(fallback)
-
-	if isSubstantiveTask(first) {
-		return first
-	}
-	if isSubstantiveTask(last) {
-		return last
-	}
-	if isSubstantiveTask(fallback) {
-		return fallback
-	}
-	if first != "" {
-		return first
-	}
-	if last != "" {
-		return last
-	}
-	return fallback
-}
-
 func normalizeTaskSummary(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -1061,25 +1021,6 @@ func looksLikeSessionMetadata(s string) bool {
 		strings.HasPrefix(lower, "shell:") ||
 		strings.HasPrefix(lower, "current_date:") ||
 		strings.HasPrefix(lower, "timezone:")
-}
-
-func isSubstantiveTask(s string) bool {
-	s = strings.TrimSpace(strings.ToLower(s))
-	if s == "" {
-		return false
-	}
-	trivial := map[string]struct{}{
-		"y": {}, "yes": {}, "ok": {}, "okay": {}, "sure": {}, "thanks": {},
-		"thank you": {}, "continue": {}, "go ahead": {}, "do it": {},
-		"try that": {}, "push": {}, "ship it": {}, "sounds good": {},
-	}
-	if _, ok := trivial[s]; ok {
-		return false
-	}
-	if len([]rune(s)) < 12 && !strings.Contains(s, " ") {
-		return false
-	}
-	return true
 }
 
 func (a *App) selectedSession() *model.SessionInfo {
@@ -1173,11 +1114,7 @@ func (a App) View() string {
 		return appStyle.Width(a.width).Height(a.height).Render(renderRenameModal(a.renameInput, baseName, a.width, a.height))
 	}
 	if a.taskMode {
-		current := ""
-		if s := a.selectedSession(); s != nil {
-			current = s.TaskSummary
-		}
-		return appStyle.Width(a.width).Height(a.height).Render(renderTaskModal(a.taskInput, current, a.width, a.height))
+		return appStyle.Width(a.width).Height(a.height).Render(renderTaskModal(a.taskInput, a.width, a.height))
 	}
 	return appStyle.Width(a.width).Height(a.height).Render(view)
 }
@@ -1193,20 +1130,59 @@ func (a App) renderSessionsBody(filtered []model.SessionInfo, bodyHeight int) st
 	todoHeight := a.todoSectionHeight(bodyHeight, false)
 	sessionHeight := bodyHeight - todoHeight - 2
 
-	// Sessions table
-	var listLines []string
-	listLines = append(listLines, renderSessionListHeader(leftWidth-2, a.sortMode))
-	for i, s := range filtered {
-		listLines = append(listLines, renderSessionListRow(s, i == a.selectedIdx, a.blinkOn, a.spinnerIdx, leftWidth-2))
+	// Sessions table with scroll to keep selected visible
+	header := renderSessionListHeader(leftWidth-2, a.sortMode)
+	headerLC := strings.Count(header, "\n") + 1
+	maxVisible := max(1, sessionHeight-2)
+	availForRows := maxVisible - headerLC
+	if availForRows < 1 {
+		availForRows = 1
 	}
+
+	// Render each row and flatten into individual lines, tracking session starts
+	var allRowLines []string
+	rowStart := make([]int, len(filtered))
+	for i, s := range filtered {
+		rowStart[i] = len(allRowLines)
+		row := renderSessionListRow(s, i == a.selectedIdx, a.blinkOn, a.spinnerIdx, leftWidth-2)
+		allRowLines = append(allRowLines, strings.Split(row, "\n")...)
+	}
+
+	// Calculate scroll offset to keep selected session visible
+	scrollOffset := 0
+	if a.selectedIdx < len(rowStart) {
+		selStart := rowStart[a.selectedIdx]
+		selEnd := len(allRowLines)
+		if a.selectedIdx+1 < len(rowStart) {
+			selEnd = rowStart[a.selectedIdx+1]
+		}
+		if selEnd > scrollOffset+availForRows {
+			scrollOffset = selEnd - availForRows
+		}
+		if selStart < scrollOffset {
+			scrollOffset = selStart
+		}
+	}
+
+	// Build visible content
+	var listParts []string
+	listParts = append(listParts, header)
 	if len(filtered) == 0 {
 		noSess := lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  No sessions found")
 		if a.filterText != "" {
 			noSess = lipgloss.NewStyle().Foreground(tokenFgMuted).Render("  No sessions match filter")
 		}
-		listLines = append(listLines, noSess)
+		listParts = append(listParts, noSess)
+	} else if len(allRowLines) > 0 {
+		end := scrollOffset + availForRows
+		if end > len(allRowLines) {
+			end = len(allRowLines)
+		}
+		if scrollOffset < len(allRowLines) {
+			listParts = append(listParts, strings.Join(allRowLines[scrollOffset:end], "\n"))
+		}
 	}
-	listContent := trimToLines(strings.Join(listLines, "\n"), max(1, sessionHeight-2))
+	listContent := strings.Join(listParts, "\n")
 	sessionPanel := activePanelBorder.Width(leftWidth).Height(sessionHeight).Render(listContent)
 
 	// Todo section (read-only in sessions tab; press 2 to manage)

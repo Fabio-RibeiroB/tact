@@ -33,8 +33,8 @@ func TestSessionInfoNameMethods(t *testing.T) {
 	}
 	s.ManualTask = ""
 	s.TaskSummary = "fix session colors"
-	if got := s.WorkingTask(); got != "fix session colors" {
-		t.Fatalf("WorkingTask() with inferred task = %q, want %q", got, "fix session colors")
+	if got := s.WorkingTask(); got != "" {
+		t.Fatalf("WorkingTask() without manual task = %q, want empty", got)
 	}
 	if got := s.ManualWorkingTask(); got != "" {
 		t.Fatalf("ManualWorkingTask() without manual value = %q, want empty", got)
